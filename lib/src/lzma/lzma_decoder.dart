@@ -95,7 +95,7 @@ class LzmaDecoder {
       required int literalPositionBits,
       required int positionBits})
       : _literalContextBits = literalContextBits {
-    this._input = RangeDecoder(input);
+    _input = RangeDecoder(input);
 
     _output = List<int>.filled(uncompressedLength, 0);
 
