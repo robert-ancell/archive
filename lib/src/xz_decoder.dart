@@ -2,6 +2,8 @@ import 'util/archive_exception.dart';
 import 'util/crc32.dart';
 import 'util/input_stream.dart';
 
+import 'lzma/lzma_decoder.dart';
+
 /// Decompress data with the xz format decoder.
 class XZDecoder {
   List<int> decodeBytes(List<int> data, {bool verify = false}) {
@@ -78,10 +80,23 @@ class XZDecoder {
     }
 
     var filterIds = <int>[];
+    var dictionarySize = 0;
     for (var i = 0; i < nFilters; i++) {
       var id = _readMultibyteInteger(header);
       var propertiesLength = _readMultibyteInteger(header);
-      header.readBytes(propertiesLength);
+      var properties = header.readBytes(propertiesLength);
+      if (id == 0x21) {
+        var v = properties[0];
+        if (v > 40) {
+          throw ArchiveException('Invalid LZMA dictionary size');
+        } else if (v == 40) {
+          dictionarySize = 1 << 32;
+        } else if (v % 2 == 0) {
+          dictionarySize = 1 << ((v ~/ 2) + 12);
+        } else {
+          dictionarySize = 1 << (((v - 1) ~/ 2) + 11);
+        }
+      }
       filterIds.add(id);
     }
     _readPadding(header);
@@ -96,7 +111,10 @@ class XZDecoder {
       throw ArchiveException('Unsupported filters');
     }
 
-    var data = _readLZMA2(input, uncompressedLength);
+    var data = _readLZMA2(input, dictionarySize);
+    if (uncompressedLength != null && data.length != uncompressedLength) {
+      throw ArchiveException("Uncompressed data doesn't match expected length");
+    }
     _readPadding(input);
 
     // Checksum
@@ -141,7 +159,9 @@ class XZDecoder {
     return _XZBlock(data, compressedLength);
   }
 
-  List<int> _readLZMA2(InputStreamBase input, int? uncompressedLength) {
+  // Reads LZMA2 data from [input].
+  // Returns the decompressed data.
+  List<int> _readLZMA2(InputStreamBase input, int dictionarySize) {
     var data = <int>[];
     while (true) {
       var control = input.readByte();
@@ -150,17 +170,39 @@ class XZDecoder {
       // 00000001 - reset dictionary and uncompresed data
       // 00000010 - uncompressed data
       // 1rrxxxxx - LZMA data with reset (r) and bits 16-20 of size (x)
-      if (control == 0) {
-        if (uncompressedLength != null && data.length != uncompressedLength) {
-          throw ArchiveException(
-              "Uncompressed data doesn't match expected length");
+      if (control & 0x80 == 0) {
+        if (control == 0) {
+          return data;
+        } else if (control == 1) {
+          var length = input.readByte() << 8 | input.readByte() + 1;
+          data.addAll(input.readBytes(length).toUint8List());
+        } else {
+          throw ArchiveException('Unknown LZMA2 control code $control');
         }
-        return data;
-      } else if (control == 1) {
-        var length = input.readByte() << 8 | input.readByte() + 1;
-        data.addAll(input.readBytes(length).toUint8List());
       } else {
-        throw ArchiveException('Unknown LZMA2 control code $control');
+        var reset = (control >> 5) & 0x3;
+        var uncompressedLength = (control & 0x1f) << 16 |
+            input.readByte() << 8 |
+            input.readByte() + 1;
+        var compressedLength = input.readByte() << 8 | input.readByte() + 1;
+        var literalContextBits = 0;
+        var literalPositionStateBits = 0;
+        var positionStateBits = 0;
+        if (reset >= 2) {
+          var properties = input.readByte();
+          var positionStateBits = properties ~/ 45;
+          properties -= positionStateBits * 45;
+          var literalPositionStateBits = properties ~/ 9;
+          var literalContextBits = properties - literalPositionStateBits * 8;
+        }
+
+        var decoder = LzmaDecoder(
+            input: input.readBytes(compressedLength),
+            literalContextBits: literalContextBits,
+            literalPositionStateBits: literalPositionStateBits,
+            positionStateBits: positionStateBits,
+            uncompressedLength: uncompressedLength);
+        data.addAll(decoder.decode());
       }
     }
   }
