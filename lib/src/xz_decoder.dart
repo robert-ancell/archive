@@ -186,21 +186,21 @@ class XZDecoder {
             input.readByte() + 1;
         var compressedLength = input.readByte() << 8 | input.readByte() + 1;
         var literalContextBits = 0;
-        var literalPositionStateBits = 0;
-        var positionStateBits = 0;
+        var literalPositionBits = 0;
+        var positionBits = 0;
         if (reset >= 2) {
           var properties = input.readByte();
-          var positionStateBits = properties ~/ 45;
-          properties -= positionStateBits * 45;
-          var literalPositionStateBits = properties ~/ 9;
-          var literalContextBits = properties - literalPositionStateBits * 8;
+          positionBits = properties ~/ 45;
+          properties -= positionBits * 45;
+          literalPositionBits = properties ~/ 9;
+          literalContextBits = properties - literalPositionBits * 8;
         }
 
         var decoder = LzmaDecoder(
             input: input.readBytes(compressedLength),
             literalContextBits: literalContextBits,
-            literalPositionStateBits: literalPositionStateBits,
-            positionStateBits: positionStateBits,
+            literalPositionBits: literalPositionBits,
+            positionBits: positionBits,
             uncompressedLength: uncompressedLength);
         data.addAll(decoder.decode());
       }
