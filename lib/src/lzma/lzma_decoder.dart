@@ -31,8 +31,10 @@ const int DIST_STATES = 4;
 const int DIST_SLOT_BITS = 6;
 const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
 
-const DIST_MODEL_START = 4;
-const DIST_MODEL_END = 14;
+const int DIST_MODEL_START = 4;
+const int DIST_MODEL_END = 14;
+const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
+const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
 
 const int MATCH_LEN_MIN = 2;
 const int LEN_LOW_BITS = 3;
@@ -42,9 +44,16 @@ const int LEN_MID_SYMBOLS = (1 << LEN_MID_BITS);
 const int LEN_HIGH_BITS = 8;
 const int LEN_HIGH_SYMBOLS = (1 << LEN_HIGH_BITS);
 
+const int ALIGN_BITS = 4;
+const int ALIGN_SIZE = (1 << ALIGN_BITS);
+
 class LzmaDecoder {
+  // Compressed data.
   late final RangeDecoder input;
-  final int uncompressedLength;
+
+  // Uncompressed data.
+  late final List<int> output;
+  var outputPosition = 0;
 
   final int literalContextBits;
   late final int _positionMask;
@@ -59,28 +68,30 @@ class LzmaDecoder {
   late final List<int> is_rep1;
   late final List<int> is_rep2;
   late final List<List<int>> dist_slot;
+  late final List<int> dist_special;
+  late final List<int> dist_align;
   late final List<int> lengthChoice;
   late final List<List<int>> low;
   late final List<List<int>> mid;
   late final List<int> high;
 
+  // Last four distances used in matches.
   var rep0 = 0;
   var rep1 = 0;
   var rep2 = 0;
   var rep3 = 0;
 
-  late final List<int> dictionary;
-  var dictionaryPosition = 0;
-
   var state = LzmaState.Lit_Lit;
 
   LzmaDecoder(
       {required InputStreamBase input,
-      required this.uncompressedLength,
+      required int uncompressedLength,
       required this.literalContextBits,
       required int literalPositionBits,
       required int positionBits}) {
     this.input = RangeDecoder(input);
+
+    output = List<int>.filled(uncompressedLength, 0);
 
     _positionMask = (1 << positionBits) - 1;
     _literalPositionMask = (1 << literalPositionBits) - 1;
@@ -103,6 +114,9 @@ class LzmaDecoder {
     for (var i = 0; i < DIST_STATES; i++) {
       dist_slot.add(List<int>.filled(DIST_SLOTS, defaultProb));
     }
+    dist_special =
+        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, defaultProb);
+    dist_align = List<int>.filled(ALIGN_SIZE, defaultProb);
     lengthChoice = [defaultProb, defaultProb];
     low = <List<int>>[];
     mid = <List<int>>[];
@@ -111,13 +125,11 @@ class LzmaDecoder {
       mid.add(List<int>.filled(LEN_MID_SYMBOLS, defaultProb));
     }
     high = List<int>.filled(LEN_HIGH_SYMBOLS, defaultProb);
-
-    dictionary = List<int>.filled(uncompressedLength, 0);
   }
 
   List<int> decode() {
-    while (true) {
-      var posState = dictionaryPosition & _positionMask;
+    while (outputPosition < output.length) {
+      var posState = outputPosition & _positionMask;
       if (input.readBit(is_match[state.index], posState) == 0) {
         _decodeLiteral();
       } else if (input.readBit(is_rep, state.index) == 0) {
@@ -127,16 +139,14 @@ class LzmaDecoder {
       }
     }
 
-    return List<int>.filled(uncompressedLength, 0);
+    return output;
   }
 
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
-    var prevByte =
-        dictionaryPosition > 0 ? dictionary[dictionaryPosition - 1] : 0;
+    var prevByte = outputPosition > 0 ? output[outputPosition - 1] : 0;
     var low = prevByte >> (8 - literalContextBits);
-    var high =
-        (dictionaryPosition & _literalPositionMask) << literalContextBits;
+    var high = (outputPosition & _literalPositionMask) << literalContextBits;
     var probs = literal[low + high];
 
     int symbol;
@@ -156,7 +166,7 @@ class LzmaDecoder {
       case LzmaState.NonLit_Match:
       case LzmaState.NonLit_Rep:
         symbol = 1;
-        var matchByte = dictionary[dictionaryPosition - rep0 - 1] << 1;
+        var matchByte = output[outputPosition - rep0 - 1] << 1;
         var offset = 0x100;
 
         while (true) {
@@ -179,9 +189,9 @@ class LzmaDecoder {
         break;
     }
 
-    // Add new byte to the dictionary.
-    dictionary[dictionaryPosition] = symbol;
-    dictionaryPosition++;
+    // Add new byte to the output.
+    output[outputPosition] = symbol;
+    outputPosition++;
     print('LITERAL ' + symbol.toRadixString(16).padLeft(2, '0'));
 
     switch (state) {
@@ -233,20 +243,17 @@ class LzmaDecoder {
       if (distSlot < DIST_MODEL_END) {
         distance <<= limit;
         distance = input.readBittreeReverse(
-            dist_special[distance - distSlot - 1], distance, limit);
+            dist_special, distance - distSlot - 1, distance, limit);
       } else {
-        // FIXME: rc_direct(&s->rc, &s->lzma.rep0, limit - ALIGN_BITS);
+        distance = input.readDirect(distance, limit - ALIGN_BITS);
         distance <<= ALIGN_BITS;
-        distance = input.readBittreeReverse(dist_align, distance, limit);
+        distance = input.readBittreeReverse(dist_align, 0, distance, limit);
       }
     }
 
-    print('MATCH $length $distance');
+    print('MATCH distance=$distance length=$length');
 
-    rep3 = rep2;
-    rep2 = rep1;
-    rep1 = rep0;
-    rep0 = distance;
+    _copyData(distance, length);
 
     switch (state) {
       case LzmaState.Lit_Lit:
@@ -290,17 +297,8 @@ class LzmaDecoder {
       distance = rep3;
     }
 
-    print('REPEAT length=$length distance=$distance');
-    var start = dictionaryPosition - distance - 1;
-    for (var i = 0; i < length; i++) {
-      dictionary[dictionaryPosition] = dictionary[start + i];
-      dictionaryPosition++;
-    }
-
-    rep3 = rep2;
-    rep2 = rep1;
-    rep1 = rep0;
-    rep0 = distance;
+    print('REPEAT distance=$distance length=$length');
+    _copyData(distance, length);
 
     switch (state) {
       case LzmaState.Lit_Lit:
@@ -322,6 +320,19 @@ class LzmaDecoder {
         state = LzmaState.NonLit_Rep;
         break;
     }
+  }
+
+  void _copyData(int distance, int length) {
+    var start = outputPosition - distance - 1;
+    for (var i = 0; i < length; i++) {
+      output[outputPosition] = output[start + i];
+      outputPosition++;
+    }
+
+    rep3 = rep2;
+    rep2 = rep1;
+    rep1 = rep0;
+    rep0 = distance;
   }
 
   int _readLength(int posState) {
@@ -393,13 +404,28 @@ class RangeDecoder {
     }
   }
 
-  int readBittreeReverse(List<int> probabilities, int value, int limit) {
+  int readBittreeReverse(
+      List<int> probabilities, int offset, int value, int limit) {
     var symbol = 1;
     while (true) {
-      var b = readBit(probabilities, symbol);
+      var b = readBit(probabilities, offset + symbol);
       symbol = (symbol << 1) | b;
       if (symbol >= limit) {
         return symbol;
+      }
+    }
+  }
+
+  int readDirect(int value, int limit) {
+    while (true) {
+      range >>= 1;
+      code -= range;
+      var mask = 0 - (code >> 31); // FIXME?
+      code += range & mask;
+      value = (value << 1) + (mask + 1);
+      limit--;
+      if (limit <= 0) {
+        return value;
       }
     }
   }
