@@ -22,6 +22,8 @@ const int RC_BIT_MODEL_TOTAL_BITS = 11;
 const int RC_BIT_MODEL_TOTAL = (1 << RC_BIT_MODEL_TOTAL_BITS);
 const int RC_MOVE_BITS = 5;
 
+const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
+
 const int POS_STATES_MAX = (1 << 4);
 
 const int LITERAL_CODER_SIZE = 0x300;
@@ -74,11 +76,8 @@ class LzmaDecoder {
   late final List<int> dist_special;
   late final List<int> dist_align;
 
-  // Probabilty trees for decoding lengths.
-  late final List<int> lengthChoice;
-  late final List<List<int>> low;
-  late final List<List<int>> mid;
-  late final List<int> high;
+  late final LengthDecoder _matchLengthDecoder;
+  late final LengthDecoder _repeatLengthDecoder;
 
   // Last four distances used in matches.
   var rep0 = 0;
@@ -102,35 +101,42 @@ class LzmaDecoder {
     _positionMask = (1 << positionBits) - 1;
     _literalPositionMask = (1 << literalPositionBits) - 1;
 
-    var defaultProb = RC_BIT_MODEL_TOTAL ~/ 2;
+    _matchLengthDecoder = LengthDecoder(_input);
+    _repeatLengthDecoder = LengthDecoder(_input);
+
+    reset();
+  }
+
+  void reset() {
+    state = LzmaState.Lit_Lit;
+    rep0 = 0;
+    rep1 = 0;
+    rep2 = 0;
+    rep3 = 0;
+
     is_match = <List<int>>[];
     for (var i = 0; i < LzmaState.values.length; i++) {
-      is_match.add(List<int>.filled(16, defaultProb));
+      is_match.add(List<int>.filled(16, DEFAULT_PROB));
     }
-    is_rep = List<int>.filled(16, defaultProb);
-    is_rep0 = List<int>.filled(16, defaultProb);
-    is_rep0_long = List<int>.filled(16, defaultProb);
-    is_rep1 = List<int>.filled(16, defaultProb);
-    is_rep2 = List<int>.filled(16, defaultProb);
+    is_rep = List<int>.filled(16, DEFAULT_PROB);
+    is_rep0 = List<int>.filled(16, DEFAULT_PROB);
+    is_rep0_long = List<int>.filled(16, DEFAULT_PROB);
+    is_rep1 = List<int>.filled(16, DEFAULT_PROB);
+    is_rep2 = List<int>.filled(16, DEFAULT_PROB);
     literal = <List<int>>[];
     for (var i = 0; i < LITERAL_CODERS_MAX; i++) {
-      literal.add(List<int>.filled(LITERAL_CODER_SIZE, defaultProb));
+      literal.add(List<int>.filled(LITERAL_CODER_SIZE, DEFAULT_PROB));
     }
     dist_slot = <List<int>>[];
     for (var i = 0; i < DIST_STATES; i++) {
-      dist_slot.add(List<int>.filled(DIST_SLOTS, defaultProb));
+      dist_slot.add(List<int>.filled(DIST_SLOTS, DEFAULT_PROB));
     }
     dist_special =
-        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, defaultProb);
-    dist_align = List<int>.filled(ALIGN_SIZE, defaultProb);
-    lengthChoice = [defaultProb, defaultProb];
-    low = <List<int>>[];
-    mid = <List<int>>[];
-    for (var i = 0; i < POS_STATES_MAX; i++) {
-      low.add(List<int>.filled(LEN_LOW_SYMBOLS, defaultProb));
-      mid.add(List<int>.filled(LEN_MID_SYMBOLS, defaultProb));
-    }
-    high = List<int>.filled(LEN_HIGH_SYMBOLS, defaultProb);
+        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, DEFAULT_PROB);
+    dist_align = List<int>.filled(ALIGN_SIZE, DEFAULT_PROB);
+
+    _matchLengthDecoder.reset();
+    _repeatLengthDecoder.reset();
   }
 
   List<int> decode() {
@@ -231,7 +237,7 @@ class LzmaDecoder {
   }
 
   void _decodeMatch(int posState) {
-    var length = _readLength(posState);
+    var length = _matchLengthDecoder.readLength(posState);
 
     var distState = length < DIST_STATES + MATCH_LEN_MIN
         ? length - MATCH_LEN_MIN
@@ -261,6 +267,11 @@ class LzmaDecoder {
 
     _repeatData(distance, length);
 
+    rep3 = rep2;
+    rep2 = rep1;
+    rep1 = rep0;
+    rep0 = distance;
+
     switch (state) {
       case LzmaState.Lit_Lit:
       case LzmaState.Match_Lit_Lit:
@@ -284,23 +295,34 @@ class LzmaDecoder {
   void _decodeRepeat(int posState) {
     int length;
     int distance;
+    var literalState = LzmaState.Lit_LongRep;
     if (_input.readBit(is_rep0, state.index) == 0) {
       if (_input.readBit(is_rep0_long, 0) == 0) {
+        literalState = LzmaState.Lit_ShortRep;
         length = 1;
         distance = 0;
       } else {
-        length = _readLength(posState);
-        distance = 0; // FIXME
+        length = _repeatLengthDecoder.readLength(posState);
+        distance = rep0;
       }
     } else if (_input.readBit(is_rep1, state.index) == 0) {
-      length = _readLength(posState);
+      length = _repeatLengthDecoder.readLength(posState);
       distance = rep1;
+      rep1 = rep0;
+      rep0 = distance;
     } else if (_input.readBit(is_rep2, state.index) == 0) {
-      length = _readLength(posState);
+      length = _repeatLengthDecoder.readLength(posState);
       distance = rep2;
+      rep2 = rep1;
+      rep1 = rep0;
+      rep0 = distance;
     } else {
-      length = _readLength(posState);
+      length = _repeatLengthDecoder.readLength(posState);
       distance = rep3;
+      rep3 = rep2;
+      rep2 = rep1;
+      rep1 = rep0;
+      rep0 = distance;
     }
 
     print('REPEAT distance=$distance length=$length');
@@ -314,9 +336,7 @@ class LzmaDecoder {
       case LzmaState.Match_Lit:
       case LzmaState.Rep_Lit:
       case LzmaState.ShortRep_Lit:
-        state = length == 1 && distance == 0
-            ? LzmaState.Lit_ShortRep
-            : LzmaState.Lit_LongRep;
+        state = literalState;
         break;
       case LzmaState.Lit_Match:
       case LzmaState.Lit_LongRep:
@@ -335,33 +355,6 @@ class LzmaDecoder {
       _output[_outputPosition] = _output[start + i];
       _outputPosition++;
     }
-
-    rep3 = rep2;
-    rep2 = rep1;
-    rep1 = rep0;
-    rep0 = distance;
-  }
-
-  int _readLength(int posState) {
-    int minLength;
-    int limit;
-    List<int> probs;
-
-    if (_input.readBit(lengthChoice, 0) == 0) {
-      minLength = MATCH_LEN_MIN;
-      limit = LEN_LOW_SYMBOLS;
-      probs = low[posState];
-    } else if (_input.readBit(lengthChoice, 1) == 0) {
-      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS;
-      limit = LEN_MID_SYMBOLS;
-      probs = mid[posState];
-    } else {
-      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS + LEN_MID_SYMBOLS;
-      limit = LEN_HIGH_SYMBOLS;
-      probs = high;
-    }
-
-    return minLength + _input.readBittree(probs, limit) - limit;
   }
 }
 
@@ -378,10 +371,7 @@ class RangeDecoder {
   }
 
   int readBit(List<int> probabilities, int index) {
-    if (range < RC_TOP_VALUE) {
-      range <<= RC_SHIFT_BITS;
-      code = (code << RC_SHIFT_BITS) | _input.readByte();
-    }
+    _normalize();
 
     var p = probabilities[index];
     var bound = (range >> RC_BIT_MODEL_TOTAL_BITS) * p;
@@ -422,6 +412,7 @@ class RangeDecoder {
 
   int readDirect(int value, int limit) {
     while (true) {
+      _normalize();
       range >>= 1;
       code -= range;
       var mask = 0 - (code >> 31); // FIXME?
@@ -432,5 +423,66 @@ class RangeDecoder {
         return value;
       }
     }
+  }
+
+  void _normalize() {
+    if (range < RC_TOP_VALUE) {
+      range <<= RC_SHIFT_BITS;
+      code = (code << RC_SHIFT_BITS) | _input.readByte();
+    }
+  }
+}
+
+class LengthDecoder {
+  final RangeDecoder _input;
+
+  // Probabilty trees for decoding lengths.
+  late final List<int> lengthChoice;
+  late final List<List<int>> low;
+  late final List<List<int>> mid;
+  late final List<int> high;
+
+  LengthDecoder(this._input) {
+    lengthChoice = [DEFAULT_PROB, DEFAULT_PROB];
+    low = <List<int>>[];
+    mid = <List<int>>[];
+    for (var i = 0; i < POS_STATES_MAX; i++) {
+      low.add(List<int>.filled(LEN_LOW_SYMBOLS, DEFAULT_PROB));
+      mid.add(List<int>.filled(LEN_MID_SYMBOLS, DEFAULT_PROB));
+    }
+    high = List<int>.filled(LEN_HIGH_SYMBOLS, DEFAULT_PROB);
+    reset();
+  }
+
+  void reset() {
+    lengthChoice[0] = DEFAULT_PROB;
+    lengthChoice[1] = DEFAULT_PROB;
+    for (var i = 0; i < POS_STATES_MAX; i++) {
+      low[i].fillRange(0, low[i].length, DEFAULT_PROB);
+      mid[i].fillRange(0, mid[i].length, DEFAULT_PROB);
+    }
+    high.fillRange(0, high.length, DEFAULT_PROB);
+  }
+
+  int readLength(int posState) {
+    int minLength;
+    int limit;
+    List<int> probs;
+
+    if (_input.readBit(lengthChoice, 0) == 0) {
+      minLength = MATCH_LEN_MIN;
+      limit = LEN_LOW_SYMBOLS;
+      probs = low[posState];
+    } else if (_input.readBit(lengthChoice, 1) == 0) {
+      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS;
+      limit = LEN_MID_SYMBOLS;
+      probs = mid[posState];
+    } else {
+      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS + LEN_MID_SYMBOLS;
+      limit = LEN_HIGH_SYMBOLS;
+      probs = high;
+    }
+
+    return minLength + _input.readBittree(probs, limit) - limit;
   }
 }
