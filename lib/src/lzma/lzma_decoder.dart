@@ -49,27 +49,32 @@ const int ALIGN_SIZE = (1 << ALIGN_BITS);
 
 class LzmaDecoder {
   // Compressed data.
-  late final RangeDecoder input;
+  late final RangeDecoder _input;
 
   // Uncompressed data.
-  late final List<int> output;
-  var outputPosition = 0;
+  late final List<int> _output; // FIXME: Uint8List
+  var _outputPosition = 0;
 
-  final int literalContextBits;
+  final int _literalContextBits;
   late final int _positionMask;
   late final int _literalPositionMask;
 
   // Probabilty trees
-  late final List<List<int>> literal;
+  // FIXME: uint16
   late final List<List<int>> is_match;
   late final List<int> is_rep;
   late final List<int> is_rep0;
   late final List<int> is_rep0_long;
   late final List<int> is_rep1;
   late final List<int> is_rep2;
+
+  late final List<List<int>> literal;
+
   late final List<List<int>> dist_slot;
   late final List<int> dist_special;
   late final List<int> dist_align;
+
+  // Probabilty trees for decoding lengths.
   late final List<int> lengthChoice;
   late final List<List<int>> low;
   late final List<List<int>> mid;
@@ -86,12 +91,13 @@ class LzmaDecoder {
   LzmaDecoder(
       {required InputStreamBase input,
       required int uncompressedLength,
-      required this.literalContextBits,
+      required int literalContextBits,
       required int literalPositionBits,
-      required int positionBits}) {
-    this.input = RangeDecoder(input);
+      required int positionBits})
+      : _literalContextBits = literalContextBits {
+    this._input = RangeDecoder(input);
 
-    output = List<int>.filled(uncompressedLength, 0);
+    _output = List<int>.filled(uncompressedLength, 0);
 
     _positionMask = (1 << positionBits) - 1;
     _literalPositionMask = (1 << literalPositionBits) - 1;
@@ -128,25 +134,25 @@ class LzmaDecoder {
   }
 
   List<int> decode() {
-    while (outputPosition < output.length) {
-      var posState = outputPosition & _positionMask;
-      if (input.readBit(is_match[state.index], posState) == 0) {
+    while (_outputPosition < _output.length) {
+      var posState = _outputPosition & _positionMask;
+      if (_input.readBit(is_match[state.index], posState) == 0) {
         _decodeLiteral();
-      } else if (input.readBit(is_rep, state.index) == 0) {
+      } else if (_input.readBit(is_rep, state.index) == 0) {
         _decodeMatch(posState);
       } else {
         _decodeRepeat(posState);
       }
     }
 
-    return output;
+    return _output;
   }
 
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
-    var prevByte = outputPosition > 0 ? output[outputPosition - 1] : 0;
-    var low = prevByte >> (8 - literalContextBits);
-    var high = (outputPosition & _literalPositionMask) << literalContextBits;
+    var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
+    var low = prevByte >> (8 - _literalContextBits);
+    var high = (_outputPosition & _literalPositionMask) << _literalContextBits;
     var probs = literal[low + high];
 
     int symbol;
@@ -158,7 +164,7 @@ class LzmaDecoder {
       case LzmaState.Match_Lit:
       case LzmaState.Rep_Lit:
       case LzmaState.ShortRep_Lit:
-        symbol = input.readBittree(probs, 0x100) & 0xff;
+        symbol = _input.readBittree(probs, 0x100) & 0xff;
         break;
       case LzmaState.Lit_Match:
       case LzmaState.Lit_LongRep:
@@ -166,7 +172,7 @@ class LzmaDecoder {
       case LzmaState.NonLit_Match:
       case LzmaState.NonLit_Rep:
         symbol = 1;
-        var matchByte = output[outputPosition - rep0 - 1] << 1;
+        var matchByte = _output[_outputPosition - rep0 - 1] << 1;
         var offset = 0x100;
 
         while (true) {
@@ -174,7 +180,7 @@ class LzmaDecoder {
           matchByte <<= 1;
           var i = offset + matchBit + symbol;
 
-          var b = input.readBit(probs, i);
+          var b = _input.readBit(probs, i);
           symbol = (symbol << 1) | b;
           if (b != 0) {
             offset &= matchBit;
@@ -190,8 +196,8 @@ class LzmaDecoder {
     }
 
     // Add new byte to the output.
-    output[outputPosition] = symbol;
-    outputPosition++;
+    _output[_outputPosition] = symbol;
+    _outputPosition++;
     print('LITERAL ' + symbol.toRadixString(16).padLeft(2, '0'));
 
     switch (state) {
@@ -231,7 +237,7 @@ class LzmaDecoder {
         ? length - MATCH_LEN_MIN
         : DIST_STATES - 1;
     var probs = dist_slot[distState];
-    var distSlot = input.readBittree(probs, DIST_SLOTS) - DIST_SLOTS;
+    var distSlot = _input.readBittree(probs, DIST_SLOTS) - DIST_SLOTS;
 
     int distance;
     if (distSlot < DIST_MODEL_START) {
@@ -242,18 +248,18 @@ class LzmaDecoder {
 
       if (distSlot < DIST_MODEL_END) {
         distance <<= limit;
-        distance = input.readBittreeReverse(
+        distance = _input.readBittreeReverse(
             dist_special, distance - distSlot - 1, distance, limit);
       } else {
-        distance = input.readDirect(distance, limit - ALIGN_BITS);
+        distance = _input.readDirect(distance, limit - ALIGN_BITS);
         distance <<= ALIGN_BITS;
-        distance = input.readBittreeReverse(dist_align, 0, distance, limit);
+        distance = _input.readBittreeReverse(dist_align, 0, distance, limit);
       }
     }
 
     print('MATCH distance=$distance length=$length');
 
-    _copyData(distance, length);
+    _repeatData(distance, length);
 
     switch (state) {
       case LzmaState.Lit_Lit:
@@ -278,18 +284,18 @@ class LzmaDecoder {
   void _decodeRepeat(int posState) {
     int length;
     int distance;
-    if (input.readBit(is_rep0, state.index) == 0) {
-      if (input.readBit(is_rep0_long, 0) == 0) {
+    if (_input.readBit(is_rep0, state.index) == 0) {
+      if (_input.readBit(is_rep0_long, 0) == 0) {
         length = 1;
         distance = 0;
       } else {
         length = _readLength(posState);
         distance = 0; // FIXME
       }
-    } else if (input.readBit(is_rep1, state.index) == 0) {
+    } else if (_input.readBit(is_rep1, state.index) == 0) {
       length = _readLength(posState);
       distance = rep1;
-    } else if (input.readBit(is_rep2, state.index) == 0) {
+    } else if (_input.readBit(is_rep2, state.index) == 0) {
       length = _readLength(posState);
       distance = rep2;
     } else {
@@ -298,7 +304,7 @@ class LzmaDecoder {
     }
 
     print('REPEAT distance=$distance length=$length');
-    _copyData(distance, length);
+    _repeatData(distance, length);
 
     switch (state) {
       case LzmaState.Lit_Lit:
@@ -322,11 +328,12 @@ class LzmaDecoder {
     }
   }
 
-  void _copyData(int distance, int length) {
-    var start = outputPosition - distance - 1;
+  // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
+  void _repeatData(int distance, int length) {
+    var start = _outputPosition - distance - 1;
     for (var i = 0; i < length; i++) {
-      output[outputPosition] = output[start + i];
-      outputPosition++;
+      _output[_outputPosition] = _output[start + i];
+      _outputPosition++;
     }
 
     rep3 = rep2;
@@ -340,11 +347,11 @@ class LzmaDecoder {
     int limit;
     List<int> probs;
 
-    if (input.readBit(lengthChoice, 0) == 0) {
+    if (_input.readBit(lengthChoice, 0) == 0) {
       minLength = MATCH_LEN_MIN;
       limit = LEN_LOW_SYMBOLS;
       probs = low[posState];
-    } else if (input.readBit(lengthChoice, 1) == 0) {
+    } else if (_input.readBit(lengthChoice, 1) == 0) {
       minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS;
       limit = LEN_MID_SYMBOLS;
       probs = mid[posState];
@@ -354,41 +361,38 @@ class LzmaDecoder {
       probs = high;
     }
 
-    return minLength + input.readBittree(probs, limit) - limit;
+    return minLength + _input.readBittree(probs, limit) - limit;
   }
 }
 
 class RangeDecoder {
-  final InputStreamBase input;
+  final InputStreamBase _input;
   var range = 0xfffffffe;
   var code = 0;
 
-  RangeDecoder(this.input) {
+  RangeDecoder(this._input) {
     // Load first five bytes into the range decoder.
     for (var i = 0; i < 5; i++) {
-      code = (code << 8 | input.readByte()) & 0xffffffff;
+      code = (code << 8 | _input.readByte()) & 0xffffffff;
     }
   }
 
   int readBit(List<int> probabilities, int index) {
     if (range < RC_TOP_VALUE) {
       range <<= RC_SHIFT_BITS;
-      code = (code << RC_SHIFT_BITS) | input.readByte();
+      code = (code << RC_SHIFT_BITS) | _input.readByte();
     }
 
     var p = probabilities[index];
     var bound = (range >> RC_BIT_MODEL_TOTAL_BITS) * p;
-    //print('code=$code bound=$bound prob=$p');
     if (code < bound) {
       range = bound;
       probabilities[index] += (RC_BIT_MODEL_TOTAL - p) >> RC_MOVE_BITS;
-      //print('0 prob=${probabilities[index]}');
       return 0;
     } else {
       range -= bound;
       code -= bound;
       probabilities[index] -= p >> RC_MOVE_BITS;
-      //print('1 prob=${probabilities[index]}');
       return 1;
     }
   }
@@ -407,13 +411,13 @@ class RangeDecoder {
   int readBittreeReverse(
       List<int> probabilities, int offset, int value, int limit) {
     var symbol = 1;
-    while (true) {
+    for (var i = 0; i < limit; i++) {
       var b = readBit(probabilities, offset + symbol);
       symbol = (symbol << 1) | b;
-      if (symbol >= limit) {
-        return symbol;
-      }
+      value |= b << i;
     }
+
+    return value;
   }
 
   int readDirect(int value, int limit) {
