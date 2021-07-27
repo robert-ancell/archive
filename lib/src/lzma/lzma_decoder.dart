@@ -340,7 +340,7 @@ class _LengthDecoder {
     longProbabilities.reset();
   }
 
-  // Read a length field from the range decoder.
+  // Read a length field.
   int readLength(int posState) {
     if (_input.readBit(formProbabilities, 0) == 0) {
       // 0xxx - Length 2 - 9
@@ -368,14 +368,14 @@ class _DistanceDecoder {
   static const int ALIGN_BITS = 4;
 
   final RangeDecoder _input;
-  late final List<RangeDecoderProbabilities> dist_slot;
+  late final List<RangeDecoderProbabilities> _slotProbabilities;
   late final RangeDecoderProbabilities dist_special;
   late final RangeDecoderProbabilities dist_align;
 
   _DistanceDecoder(this._input) {
-    dist_slot = <RangeDecoderProbabilities>[];
+    _slotProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < DIST_STATES; i++) {
-      dist_slot.add(RangeDecoderProbabilities(DIST_SLOTS));
+      _slotProbabilities.add(RangeDecoderProbabilities(DIST_SLOTS));
     }
     var fullDistancesBits = (DIST_MODEL_END ~/ 2);
     var fullDistances = (1 << fullDistancesBits);
@@ -384,32 +384,34 @@ class _DistanceDecoder {
     dist_align = RangeDecoderProbabilities(alignSize);
   }
 
+  // Reset this decoder.
   void reset() {
-    for (var tree in dist_slot) {
+    for (var tree in _slotProbabilities) {
       tree.reset();
     }
     dist_special.reset();
     dist_align.reset();
   }
 
+  // Reads a distance field.
   int readDistance(int length) {
     var distState = length < DIST_STATES + MATCH_LEN_MIN
         ? length - MATCH_LEN_MIN
         : DIST_STATES - 1;
-    var probabilities = dist_slot[distState];
-    var distSlot = _input.readBittree(probabilities, DIST_SLOT_BITS);
+    var slot =
+        _input.readBittree(_slotProbabilities[distState], DIST_SLOT_BITS);
 
-    if (distSlot < DIST_MODEL_START) {
-      return distSlot;
+    if (slot < DIST_MODEL_START) {
+      return slot;
     }
 
-    var limit = (distSlot >> 1) - 1;
-    var distance = 2 + (distSlot & 1);
+    var limit = (slot >> 1) - 1;
+    var distance = 2 + (slot & 1);
 
-    if (distSlot < DIST_MODEL_END) {
+    if (slot < DIST_MODEL_END) {
       distance <<= limit;
       return _input.readBittreeReverse(
-          dist_special, distance - distSlot - 1, distance, limit);
+          dist_special, distance - slot - 1, distance, limit);
     } else {
       distance = _input.readDirect(distance, limit - ALIGN_BITS);
       distance <<= ALIGN_BITS;
