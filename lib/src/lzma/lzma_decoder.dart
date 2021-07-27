@@ -266,7 +266,8 @@ class LzmaDecoder {
       } else {
         distance = _input.readDirect(distance, limit - ALIGN_BITS);
         distance <<= ALIGN_BITS;
-        distance = _input.readBittreeReverse(dist_align, 0, distance, limit);
+        distance =
+            _input.readBittreeReverse(dist_align, 0, distance, ALIGN_BITS);
       }
     }
 
@@ -422,9 +423,12 @@ class RangeDecoder {
       _normalize();
       range >>= 1;
       code -= range;
-      var mask = 0 - (code >> 31); // FIXME?
-      code += range & mask;
-      value = (value << 1) + (mask + 1);
+      value <<= 1;
+      if (code & 0x80000000 != 0) {
+        code += range;
+      } else {
+        value++;
+      }
       limit--;
       if (limit <= 0) {
         return value;
