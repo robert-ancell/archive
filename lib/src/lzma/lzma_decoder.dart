@@ -16,15 +16,15 @@ class LzmaDecoder {
   int _literalContextBits = 3;
 
   // Bit probabilities for determining which LZMA packet is present.
-  late final List<RangeDecoderTable> _nonLiteralTable;
+  late final List<RangeDecoderTable> _nonLiteralTables;
   late final RangeDecoderTable _repeatTable;
   late final RangeDecoderTable _repeat0Table;
-  late final List<RangeDecoderTable> _longRepeat0Table;
+  late final List<RangeDecoderTable> _longRepeat0Tables;
   late final RangeDecoderTable _repeat1Table;
   late final RangeDecoderTable _repeat2Table;
 
   // Bit probabilities when decoding literals.
-  late final List<List<RangeDecoderTable>> _literalTable;
+  late final List<List<RangeDecoderTable>> _literalTables;
 
   // Decoder to read length fields in match packets.
   late final _LengthDecoder _matchLengthDecoder;
@@ -49,19 +49,19 @@ class LzmaDecoder {
 
   /// Creates an LZMA decoder.
   LzmaDecoder() {
-    _nonLiteralTable = <RangeDecoderTable>[];
+    _nonLiteralTables = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _nonLiteralTable.add(RangeDecoderTable(_LzmaState.values.length));
+      _nonLiteralTables.add(RangeDecoderTable(_LzmaState.values.length));
     }
     _repeatTable = RangeDecoderTable(_LzmaState.values.length);
     _repeat0Table = RangeDecoderTable(_LzmaState.values.length);
-    _longRepeat0Table = <RangeDecoderTable>[];
+    _longRepeat0Tables = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _longRepeat0Table.add(RangeDecoderTable(_LzmaState.values.length));
+      _longRepeat0Tables.add(RangeDecoderTable(_LzmaState.values.length));
     }
     _repeat1Table = RangeDecoderTable(_LzmaState.values.length);
     _repeat2Table = RangeDecoderTable(_LzmaState.values.length);
-    _literalTable = <List<RangeDecoderTable>>[];
+    _literalTables = <List<RangeDecoderTable>>[];
 
     var positionCount = 1 << _positionBits;
     _matchLengthDecoder = _LengthDecoder(_input, positionCount);
@@ -88,10 +88,10 @@ class LzmaDecoder {
     _distance3 = 0;
 
     var maxLiteralStates = 1 << (_literalPositionBits + _literalContextBits);
-    if (_literalTable.length != maxLiteralStates) {
-      _literalTable.clear();
+    if (_literalTables.length != maxLiteralStates) {
+      _literalTables.clear();
       for (var i = 0; i < maxLiteralStates; i++) {
-        _literalTable.add([
+        _literalTables.add([
           RangeDecoderTable(256),
           RangeDecoderTable(256),
           RangeDecoderTable(256)
@@ -99,17 +99,17 @@ class LzmaDecoder {
       }
     }
 
-    for (var table in _nonLiteralTable) {
+    for (var table in _nonLiteralTables) {
       table.reset();
     }
     _repeatTable.reset();
     _repeat0Table.reset();
-    for (var table in _longRepeat0Table) {
+    for (var table in _longRepeat0Tables) {
       table.reset();
     }
     _repeat1Table.reset();
     _repeat2Table.reset();
-    for (var table in _literalTable) {
+    for (var table in _literalTables) {
       table[0].reset();
       table[1].reset();
       table[2].reset();
@@ -136,7 +136,7 @@ class LzmaDecoder {
     while (_dictionary.length < finalSize) {
       var positionMask = (1 << _positionBits) - 1;
       var posState = _dictionary.length & positionMask;
-      if (_input.readBit(_nonLiteralTable[state.index], posState) == 0) {
+      if (_input.readBit(_nonLiteralTables[state.index], posState) == 0) {
         _decodeLiteral();
       } else if (_input.readBit(_repeatTable, state.index) == 0) {
         _decodeMatch(posState);
@@ -176,11 +176,11 @@ class LzmaDecoder {
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
     var high = (_dictionary.length & positionMask) << _literalContextBits;
-    var probabilities = _literalTable[low + high];
+    var table = _literalTables[low + high];
 
     int value;
     if (_prevPacketIsLiteral()) {
-      value = _input.readBittree(probabilities[0], 8);
+      value = _input.readBittree(table[0], 8);
     } else {
       // Get the last byte before the match that just occurred.
       prevByte = _dictionary[_dictionary.length - _distance0 - 1];
@@ -193,10 +193,10 @@ class LzmaDecoder {
         if (matched) {
           var matchBit = (prevByte >> 7) & 0x1;
           prevByte <<= 1;
-          b = _input.readBit(probabilities[1 + matchBit], symbolPrefix | value);
+          b = _input.readBit(table[1 + matchBit], symbolPrefix | value);
           matched = b == matchBit;
         } else {
-          b = _input.readBit(probabilities[0], symbolPrefix | value);
+          b = _input.readBit(table[0], symbolPrefix | value);
         }
         value = (value << 1) | b;
         symbolPrefix <<= 1;
@@ -257,7 +257,7 @@ class LzmaDecoder {
   void _decodeRepeat(int posState) {
     int distance;
     if (_input.readBit(_repeat0Table, state.index) == 0) {
-      if (_input.readBit(_longRepeat0Table[state.index], posState) == 0) {
+      if (_input.readBit(_longRepeat0Tables[state.index], posState) == 0) {
         _repeatData(_distance0, 1);
         state = _prevPacketIsLiteral()
             ? _LzmaState.Lit_ShortRep
@@ -325,18 +325,18 @@ class _LengthDecoder {
   late final RangeDecoderTable formTable;
 
   // Bit probabilities when lengths are in the short form (2-9).
-  late final List<RangeDecoderTable> shortTable;
+  late final List<RangeDecoderTable> shortTables;
 
   // Bit probabilities when lengths are in the medium form (10-17).
-  late final List<RangeDecoderTable> mediumTable;
+  late final List<RangeDecoderTable> mediumTables;
 
   // Bit probabilities when lengths are in the long form (18-273).
   late final RangeDecoderTable longTable;
 
   _LengthDecoder(this._input, int positionCount) {
     formTable = RangeDecoderTable(2);
-    shortTable = <RangeDecoderTable>[];
-    mediumTable = <RangeDecoderTable>[];
+    shortTables = <RangeDecoderTable>[];
+    mediumTables = <RangeDecoderTable>[];
     longTable = RangeDecoderTable(256);
 
     reset(positionCount);
@@ -345,18 +345,18 @@ class _LengthDecoder {
   // Reset this decoder.
   void reset(int positionCount) {
     formTable.reset();
-    if (positionCount != shortTable.length) {
-      shortTable.clear();
-      mediumTable.clear();
+    if (positionCount != shortTables.length) {
+      shortTables.clear();
+      mediumTables.clear();
       for (var i = 0; i < positionCount; i++) {
-        shortTable.add(RangeDecoderTable(8));
-        mediumTable.add(RangeDecoderTable(8));
+        shortTables.add(RangeDecoderTable(8));
+        mediumTables.add(RangeDecoderTable(8));
       }
     } else {
-      for (var table in shortTable) {
+      for (var table in shortTables) {
         table.reset();
       }
-      for (var table in mediumTable) {
+      for (var table in mediumTables) {
         table.reset();
       }
     }
@@ -367,10 +367,10 @@ class _LengthDecoder {
   int readLength(int posState) {
     if (_input.readBit(formTable, 0) == 0) {
       // 0xxx - Length 2 - 9
-      return 2 + _input.readBittree(shortTable[posState], 3);
+      return 2 + _input.readBittree(shortTables[posState], 3);
     } else if (_input.readBit(formTable, 1) == 0) {
       // 10xxx - Length 10 - 17
-      return 10 + _input.readBittree(mediumTable[posState], 3);
+      return 10 + _input.readBittree(mediumTables[posState], 3);
     } else {
       // 11xxxxxxxx - Length 18 - 273
       return 18 + _input.readBittree(longTable, 8);
@@ -390,24 +390,24 @@ class _DistanceDecoder {
   final RangeDecoder _input;
 
   // Bit probabilities for the 6 bit slot.
-  late final List<RangeDecoderTable> _slotTable;
+  late final List<RangeDecoderTable> _slotTables;
 
   // Bit probabilities for slots 4-13.
-  late final List<RangeDecoderTable> _shortTable;
+  late final List<RangeDecoderTable> _shortTables;
 
   // Bit probabilities for slots 14-63.
   late final RangeDecoderTable _longTable;
 
   _DistanceDecoder(this._input) {
-    _slotTable = <RangeDecoderTable>[];
+    _slotTables = <RangeDecoderTable>[];
     var slotSize = 1 << _slotBitCount;
     for (var i = 0; i < 4; i++) {
-      _slotTable.add(RangeDecoderTable(slotSize));
+      _slotTables.add(RangeDecoderTable(slotSize));
     }
-    _shortTable = <RangeDecoderTable>[];
+    _shortTables = <RangeDecoderTable>[];
     for (var slot = 4; slot < 14; slot++) {
       var bitCount = (slot ~/ 2) - 1;
-      _shortTable.add(RangeDecoderTable(1 << bitCount));
+      _shortTables.add(RangeDecoderTable(1 << bitCount));
     }
     var alignSize = 1 << _alignBitCount;
     _longTable = RangeDecoderTable(alignSize);
@@ -415,10 +415,10 @@ class _DistanceDecoder {
 
   // Reset this decoder.
   void reset() {
-    for (var table in _slotTable) {
+    for (var table in _slotTables) {
       table.reset();
     }
-    for (var table in _shortTable) {
+    for (var table in _shortTables) {
       table.reset();
     }
     _longTable.reset();
@@ -428,13 +428,13 @@ class _DistanceDecoder {
   // [length] is a match length (minimum of 2).
   int readDistance(int length) {
     var distState = length - 2;
-    if (distState >= _slotTable.length) {
-      distState = _slotTable.length - 1;
+    if (distState >= _slotTables.length) {
+      distState = _slotTables.length - 1;
     }
-    var probabilities = _slotTable[distState];
+    var table = _slotTables[distState];
 
     // Distances are encoded starting with a six bit slot.
-    var slot = _input.readBittree(probabilities, _slotBitCount);
+    var slot = _input.readBittree(table, _slotBitCount);
 
     // Slots 0-3 map to the distances 0-3.
     if (slot < 4) {
@@ -448,7 +448,7 @@ class _DistanceDecoder {
     // Short distances are stored in reverse bittree format.
     if (slot < 14) {
       return prefix << bitCount |
-          _input.readBittreeReverse(_shortTable[slot - 4], bitCount);
+          _input.readBittreeReverse(_shortTables[slot - 4], bitCount);
     }
 
     // Large distances are a combination of direct bits and reverse bittree format.
