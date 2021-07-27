@@ -296,8 +296,6 @@ class LzmaDecoder {
   }
 }
 
-const int MATCH_LEN_MIN = 2;
-
 // Decodes match/repeat length fields from LZMA data.
 class _LengthDecoder {
   // Data being read from.
@@ -357,25 +355,27 @@ class _LengthDecoder {
 
 // Decodes match distance fields from LZMA data.
 class _DistanceDecoder {
-// FIXME: Kill
-  static const int DIST_STATES = 4;
   static const int DIST_SLOT_BITS = 6;
-  static const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
 
-  static const int DIST_MODEL_START = 4;
   static const int DIST_MODEL_END = 14;
 
   static const int ALIGN_BITS = 4;
 
+  // Data being read from.
   final RangeDecoder _input;
+
+  // Bit probabilities for the 6 bit slot.
   late final List<RangeDecoderProbabilities> _slotProbabilities;
+
   late final RangeDecoderProbabilities _specialProbabilities;
+
   late final RangeDecoderProbabilities _alignProbabilities;
 
   _DistanceDecoder(this._input) {
     _slotProbabilities = <RangeDecoderProbabilities>[];
-    for (var i = 0; i < DIST_STATES; i++) {
-      _slotProbabilities.add(RangeDecoderProbabilities(DIST_SLOTS));
+    var slotSize = 1 << DIST_SLOT_BITS;
+    for (var i = 0; i < 4; i++) {
+      _slotProbabilities.add(RangeDecoderProbabilities(slotSize));
     }
     var fullDistancesBits = (DIST_MODEL_END ~/ 2);
     var fullDistances = (1 << fullDistancesBits);
@@ -395,14 +395,16 @@ class _DistanceDecoder {
   }
 
   // Reads a distance field.
+  // [length] is a match length (minimum of 2).
   int readDistance(int length) {
-    var distState = length < DIST_STATES + MATCH_LEN_MIN
-        ? length - MATCH_LEN_MIN
-        : DIST_STATES - 1;
+    var distState = length - 2;
+    if (distState >= _slotProbabilities.length) {
+      distState = _slotProbabilities.length - 1;
+    }
     var probabilities = _slotProbabilities[distState];
 
     var slot = _input.readBittree(probabilities, DIST_SLOT_BITS);
-    if (slot < DIST_MODEL_START) {
+    if (slot < 4) {
       return slot;
     }
 
