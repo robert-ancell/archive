@@ -16,10 +16,12 @@ class RangeDecoderTable {
   // Table of probabilities for each symbol.
   final Uint16List table;
 
+  // Creates a new probability table for [length] elemets.
   RangeDecoderTable(int length) : table = Uint16List(length) {
     reset();
   }
 
+  // Reset the table to probabibilities of 0.5.
   void reset() {
     table.fillRange(0, table.length, _probabilityHalf);
   }
