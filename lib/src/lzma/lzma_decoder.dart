@@ -16,15 +16,17 @@ class LzmaDecoder {
   int _literalContextBits = 3;
 
   // Bit probabilities for determining which LZMA packet is present.
-  late final List<RangeDecoderTable> _nonLiteralTables;
+  final _nonLiteralTables = <RangeDecoderTable>[];
   late final RangeDecoderTable _repeatTable;
   late final RangeDecoderTable _repeat0Table;
-  late final List<RangeDecoderTable> _longRepeat0Tables;
+  final _longRepeat0Tables = <RangeDecoderTable>[];
   late final RangeDecoderTable _repeat1Table;
   late final RangeDecoderTable _repeat2Table;
 
   // Bit probabilities when decoding literals.
-  late final List<List<RangeDecoderTable>> _literalTables;
+  final _literalTables = <RangeDecoderTable>[];
+  final _matchLiteralTables0 = <RangeDecoderTable>[];
+  final _matchLiteralTables1 = <RangeDecoderTable>[];
 
   // Decoder to read length fields in match packets.
   late final _LengthDecoder _matchLengthDecoder;
@@ -49,19 +51,16 @@ class LzmaDecoder {
 
   /// Creates an LZMA decoder.
   LzmaDecoder() {
-    _nonLiteralTables = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _nonLiteralTables.add(RangeDecoderTable(_LzmaState.values.length));
     }
     _repeatTable = RangeDecoderTable(_LzmaState.values.length);
     _repeat0Table = RangeDecoderTable(_LzmaState.values.length);
-    _longRepeat0Tables = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _longRepeat0Tables.add(RangeDecoderTable(_LzmaState.values.length));
     }
     _repeat1Table = RangeDecoderTable(_LzmaState.values.length);
     _repeat2Table = RangeDecoderTable(_LzmaState.values.length);
-    _literalTables = <List<RangeDecoderTable>>[];
 
     var positionCount = 1 << _positionBits;
     _matchLengthDecoder = _LengthDecoder(_input, positionCount);
@@ -90,12 +89,12 @@ class LzmaDecoder {
     var maxLiteralStates = 1 << (_literalPositionBits + _literalContextBits);
     if (_literalTables.length != maxLiteralStates) {
       _literalTables.clear();
+      _matchLiteralTables0.clear();
+      _matchLiteralTables1.clear();
       for (var i = 0; i < maxLiteralStates; i++) {
-        _literalTables.add([
-          RangeDecoderTable(256),
-          RangeDecoderTable(256),
-          RangeDecoderTable(256)
-        ]);
+        _literalTables.add(RangeDecoderTable(256));
+        _matchLiteralTables0.add(RangeDecoderTable(256));
+        _matchLiteralTables1.add(RangeDecoderTable(256));
       }
     }
 
@@ -110,9 +109,13 @@ class LzmaDecoder {
     _repeat1Table.reset();
     _repeat2Table.reset();
     for (var table in _literalTables) {
-      table[0].reset();
-      table[1].reset();
-      table[2].reset();
+      table.reset();
+    }
+    for (var table in _matchLiteralTables0) {
+      table.reset();
+    }
+    for (var table in _matchLiteralTables1) {
+      table.reset();
     }
 
     var positionCount = 1 << _positionBits;
@@ -176,11 +179,12 @@ class LzmaDecoder {
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
     var high = (_dictionary.length & positionMask) << _literalContextBits;
-    var table = _literalTables[low + high];
+    var hash = low + high;
+    var table = _literalTables[hash];
 
     int value;
     if (_prevPacketIsLiteral()) {
-      value = _input.readBittree(table[0], 8);
+      value = _input.readBittree(table, 8);
     } else {
       // Get the last byte before the match that just occurred.
       prevByte = _dictionary[_dictionary.length - _distance0 - 1];
@@ -188,15 +192,18 @@ class LzmaDecoder {
       value = 0;
       var symbolPrefix = 1;
       var matched = true;
+      var matchTable0 = _matchLiteralTables0[hash];
+      var matchTable1 = _matchLiteralTables1[hash];
       for (var i = 0; i < 8; i++) {
         int b;
         if (matched) {
           var matchBit = (prevByte >> 7) & 0x1;
           prevByte <<= 1;
-          b = _input.readBit(table[1 + matchBit], symbolPrefix | value);
+          b = _input.readBit(
+              matchBit == 0 ? matchTable0 : matchTable1, symbolPrefix | value);
           matched = b == matchBit;
         } else {
-          b = _input.readBit(table[0], symbolPrefix | value);
+          b = _input.readBit(table, symbolPrefix | value);
         }
         value = (value << 1) | b;
         symbolPrefix <<= 1;
