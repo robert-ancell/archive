@@ -2,24 +2,6 @@ import '../util/input_stream.dart';
 
 import 'range_decoder.dart';
 
-enum _LzmaState {
-  Lit_Lit,
-  Match_Lit_Lit,
-  Rep_Lit_Lit,
-  ShortRep_Lit_Lit,
-  Match_Lit,
-  Rep_Lit,
-  ShortRep_Lit,
-  Lit_Match,
-  Lit_LongRep,
-  Lit_ShortRep,
-  NonLit_Match,
-  NonLit_Rep
-}
-
-/// FIXME: Kill
-const int LITERAL_CODER_SIZE = 0x300;
-
 class LzmaDecoder {
   // Compressed data.
   late final RangeDecoder _input;
@@ -37,7 +19,7 @@ class LzmaDecoder {
   // Number of bits used from [_output] for literal probabilities.
   final int _literalContextBits;
 
-  // Probabilty trees
+  // Bit probabilities for determining which LZMA packet is present.
   late final List<RangeDecoderProbabilities> _nonLiteralProbabilities;
   late final RangeDecoderProbabilities _repeatProbabilities;
   late final RangeDecoderProbabilities _repeat0Probabilities;
@@ -45,10 +27,16 @@ class LzmaDecoder {
   late final RangeDecoderProbabilities _repeat1Probabilities;
   late final RangeDecoderProbabilities _repeat2Probabilities;
 
+  // Bit probabilities when decoding literals.
   late final List<RangeDecoderProbabilities> _literalProbabilities;
 
+  // Decoder to read length fields in match packets.
   late final _LengthDecoder _matchLengthDecoder;
+
+  // Decoder to read length fields in repeat packets.
   late final _LengthDecoder _repeatLengthDecoder;
+
+  // Decoder to read distance fields in match packaets.
   late final _DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
@@ -57,6 +45,7 @@ class LzmaDecoder {
   var distance2 = 0;
   var distance3 = 0;
 
+  // Decoder state, used in range decoding.
   var state = _LzmaState.Lit_Lit;
 
   /// Creates an LZMA decoder reading from [input] which contains data of length [uncompressedLength] compressed with the LZMA algorithm.
@@ -88,8 +77,11 @@ class LzmaDecoder {
     _repeat1Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
     _repeat2Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
     _literalProbabilities = <RangeDecoderProbabilities>[];
-    var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
-    for (var i = 0; i < maxLiteralCodes; i++) {
+
+    /// FIXME: Kill
+    const int LITERAL_CODER_SIZE = 0x300;
+    var maxLiteralStates = 1 << (literalPositionBits + literalContextBits);
+    for (var i = 0; i < maxLiteralStates; i++) {
       _literalProbabilities.add(RangeDecoderProbabilities(LITERAL_CODER_SIZE));
     }
 
@@ -128,6 +120,7 @@ class LzmaDecoder {
   }
 
   List<int> decode() {
+    // Decode packets (literal, match or repeat) until all the data has been decoded.
     while (_outputPosition < _output.length) {
       var positionMask = (1 << _positionBits) - 1;
       var posState = _outputPosition & positionMask;
@@ -144,7 +137,8 @@ class LzmaDecoder {
     return _output;
   }
 
-  bool _prevLiteral() {
+  // Returns true if the previous packet seen was a literal.
+  bool _prevPacketIsLiteral() {
     switch (state) {
       case _LzmaState.Lit_Lit:
       case _LzmaState.Match_Lit_Lit:
@@ -163,6 +157,7 @@ class LzmaDecoder {
     }
   }
 
+  // Decode a packet containing a literal byte.
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
     var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
@@ -172,7 +167,7 @@ class LzmaDecoder {
     var probabilities = _literalProbabilities[low + high];
 
     int symbol;
-    if (_prevLiteral()) {
+    if (_prevPacketIsLiteral()) {
       symbol = _input.readBittree(probabilities, 8);
     } else {
       // Get the last byte before this match.
@@ -233,6 +228,7 @@ class LzmaDecoder {
     }
   }
 
+  // Decode a packet that matches some already decoded data.
   void _decodeMatch(int posState) {
     var length = _matchLengthDecoder.readLength(posState);
     var distance = _distanceDecoder.readDistance(length);
@@ -244,9 +240,11 @@ class LzmaDecoder {
     distance1 = distance0;
     distance0 = distance;
 
-    state = _prevLiteral() ? _LzmaState.Lit_Match : _LzmaState.NonLit_Match;
+    state =
+        _prevPacketIsLiteral() ? _LzmaState.Lit_Match : _LzmaState.NonLit_Match;
   }
 
+  // Decode a packet that repeats a match already done.
   void _decodeRepeat(int posState) {
     int length;
     int distance;
@@ -283,7 +281,7 @@ class LzmaDecoder {
 
     _repeatData(distance, length);
 
-    state = _prevLiteral() ? literalState : _LzmaState.NonLit_Rep;
+    state = _prevPacketIsLiteral() ? literalState : _LzmaState.NonLit_Rep;
   }
 
   // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
@@ -294,6 +292,22 @@ class LzmaDecoder {
       _outputPosition++;
     }
   }
+}
+
+// The decoder state which tracks the sequence of LZMA packets received.
+enum _LzmaState {
+  Lit_Lit,
+  Match_Lit_Lit,
+  Rep_Lit_Lit,
+  ShortRep_Lit_Lit,
+  Match_Lit,
+  Rep_Lit,
+  ShortRep_Lit,
+  Lit_Match,
+  Lit_LongRep,
+  Lit_ShortRep,
+  NonLit_Match,
+  NonLit_Rep
 }
 
 // Decodes match/repeat length fields from LZMA data.
