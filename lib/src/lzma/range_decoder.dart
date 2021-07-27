@@ -10,15 +10,15 @@ const int _probabilityOne = (1 << _probabilityBitCount);
 const int _probabilityHalf = _probabilityOne ~/ 2;
 
 // Probability table used with [RangeDecoder].
-class RangeDecoderProbabilities {
+class RangeDecoderTable {
   // Table of probabilities for each symbol.
-  final List<int> probabilities;
+  final List<int> table;
 
-  RangeDecoderProbabilities(int length)
-      : probabilities = List<int>.filled(length, _probabilityHalf);
+  RangeDecoderTable(int length)
+      : table = List<int>.filled(length, _probabilityHalf);
 
   void reset() {
-    probabilities.fillRange(0, probabilities.length, _probabilityHalf);
+    table.fillRange(0, table.length, _probabilityHalf);
   }
 }
 
@@ -39,8 +39,8 @@ class RangeDecoder {
   // Set the input being read from. Must be set before initializing or reading bits.
   void set input(InputStreamBase value) => _input = value;
 
-  // Read a single bit from the decoder, using the supplied [index] into a [probabilities] table.
-  int readBit(RangeDecoderProbabilities probabilities, int index) {
+  // Read a single bit from the decoder, using the supplied [index] into a probabilities [table].
+  int readBit(RangeDecoderTable table, int index) {
     if (!_initialized) {
       // Skip the first byte, then load four for the initial state.
       _input.skip(1);
@@ -52,27 +52,27 @@ class RangeDecoder {
 
     _load();
 
-    var p = probabilities.probabilities[index];
+    var p = table.table[index];
     var bound = (range >> _probabilityBitCount) * p;
     const moveBits = 5;
     if (code < bound) {
       range = bound;
-      probabilities.probabilities[index] += (_probabilityOne - p) >> moveBits;
+      table.table[index] += (_probabilityOne - p) >> moveBits;
       return 0;
     } else {
       range -= bound;
       code -= bound;
-      probabilities.probabilities[index] -= p >> moveBits;
+      table.table[index] -= p >> moveBits;
       return 1;
     }
   }
 
-  // Read a bittree of [count] bits from the decoder.
-  int readBittree(RangeDecoderProbabilities probabilities, int count) {
+  // Read a bittree (big endian) of [count] bits from the decoder.
+  int readBittree(RangeDecoderTable table, int count) {
     var value = 0;
     var symbolPrefix = 1;
     for (var i = 0; i < count; i++) {
-      var b = readBit(probabilities, symbolPrefix | value);
+      var b = readBit(table, symbolPrefix | value);
       value = (value << 1) | b;
       symbolPrefix <<= 1;
     }
@@ -80,12 +80,12 @@ class RangeDecoder {
     return value;
   }
 
-  // Read a reverse bittree of [count] bits from the decoder.
-  int readBittreeReverse(RangeDecoderProbabilities probabilities, int count) {
+  // Read a reverse bittree (little endian) of [count] bits from the decoder.
+  int readBittreeReverse(RangeDecoderTable table, int count) {
     var value = 0;
     var symbolPrefix = 1;
     for (var i = 0; i < count; i++) {
-      var b = readBit(probabilities, symbolPrefix | value);
+      var b = readBit(table, symbolPrefix | value);
       value |= b << i;
       symbolPrefix <<= 1;
     }

@@ -16,15 +16,15 @@ class LzmaDecoder {
   int _literalContextBits = 3;
 
   // Bit probabilities for determining which LZMA packet is present.
-  late final List<RangeDecoderProbabilities> _nonLiteralProbabilities;
-  late final RangeDecoderProbabilities _repeatProbabilities;
-  late final RangeDecoderProbabilities _repeat0Probabilities;
-  late final List<RangeDecoderProbabilities> _longRepeat0Probabilities;
-  late final RangeDecoderProbabilities _repeat1Probabilities;
-  late final RangeDecoderProbabilities _repeat2Probabilities;
+  late final List<RangeDecoderTable> _nonLiteralTable;
+  late final RangeDecoderTable _repeatTable;
+  late final RangeDecoderTable _repeat0Table;
+  late final List<RangeDecoderTable> _longRepeat0Table;
+  late final RangeDecoderTable _repeat1Table;
+  late final RangeDecoderTable _repeat2Table;
 
   // Bit probabilities when decoding literals.
-  late final List<List<RangeDecoderProbabilities>> _literalProbabilities;
+  late final List<List<RangeDecoderTable>> _literalTable;
 
   // Decoder to read length fields in match packets.
   late final _LengthDecoder _matchLengthDecoder;
@@ -49,21 +49,19 @@ class LzmaDecoder {
 
   /// Creates an LZMA decoder.
   LzmaDecoder() {
-    _nonLiteralProbabilities = <RangeDecoderProbabilities>[];
+    _nonLiteralTable = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _nonLiteralProbabilities
-          .add(RangeDecoderProbabilities(_LzmaState.values.length));
+      _nonLiteralTable.add(RangeDecoderTable(_LzmaState.values.length));
     }
-    _repeatProbabilities = RangeDecoderProbabilities(_LzmaState.values.length);
-    _repeat0Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
-    _longRepeat0Probabilities = <RangeDecoderProbabilities>[];
+    _repeatTable = RangeDecoderTable(_LzmaState.values.length);
+    _repeat0Table = RangeDecoderTable(_LzmaState.values.length);
+    _longRepeat0Table = <RangeDecoderTable>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _longRepeat0Probabilities
-          .add(RangeDecoderProbabilities(_LzmaState.values.length));
+      _longRepeat0Table.add(RangeDecoderTable(_LzmaState.values.length));
     }
-    _repeat1Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
-    _repeat2Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
-    _literalProbabilities = <List<RangeDecoderProbabilities>>[];
+    _repeat1Table = RangeDecoderTable(_LzmaState.values.length);
+    _repeat2Table = RangeDecoderTable(_LzmaState.values.length);
+    _literalTable = <List<RangeDecoderTable>>[];
 
     var positionCount = 1 << _positionBits;
     _matchLengthDecoder = _LengthDecoder(_input, positionCount);
@@ -90,31 +88,31 @@ class LzmaDecoder {
     _distance3 = 0;
 
     var maxLiteralStates = 1 << (_literalPositionBits + _literalContextBits);
-    if (_literalProbabilities.length != maxLiteralStates) {
-      _literalProbabilities.clear();
+    if (_literalTable.length != maxLiteralStates) {
+      _literalTable.clear();
       for (var i = 0; i < maxLiteralStates; i++) {
-        _literalProbabilities.add([
-          RangeDecoderProbabilities(256),
-          RangeDecoderProbabilities(256),
-          RangeDecoderProbabilities(256)
+        _literalTable.add([
+          RangeDecoderTable(256),
+          RangeDecoderTable(256),
+          RangeDecoderTable(256)
         ]);
       }
     }
 
-    for (var tree in _nonLiteralProbabilities) {
-      tree.reset();
+    for (var table in _nonLiteralTable) {
+      table.reset();
     }
-    _repeatProbabilities.reset();
-    _repeat0Probabilities.reset();
-    for (var tree in _longRepeat0Probabilities) {
-      tree.reset();
+    _repeatTable.reset();
+    _repeat0Table.reset();
+    for (var table in _longRepeat0Table) {
+      table.reset();
     }
-    _repeat1Probabilities.reset();
-    _repeat2Probabilities.reset();
-    for (var tree in _literalProbabilities) {
-      tree[0].reset();
-      tree[1].reset();
-      tree[2].reset();
+    _repeat1Table.reset();
+    _repeat2Table.reset();
+    for (var table in _literalTable) {
+      table[0].reset();
+      table[1].reset();
+      table[2].reset();
     }
 
     var positionCount = 1 << _positionBits;
@@ -138,10 +136,9 @@ class LzmaDecoder {
     while (_dictionary.length < finalSize) {
       var positionMask = (1 << _positionBits) - 1;
       var posState = _dictionary.length & positionMask;
-      if (_input.readBit(_nonLiteralProbabilities[state.index], posState) ==
-          0) {
+      if (_input.readBit(_nonLiteralTable[state.index], posState) == 0) {
         _decodeLiteral();
-      } else if (_input.readBit(_repeatProbabilities, state.index) == 0) {
+      } else if (_input.readBit(_repeatTable, state.index) == 0) {
         _decodeMatch(posState);
       } else {
         _decodeRepeat(posState);
@@ -179,7 +176,7 @@ class LzmaDecoder {
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
     var high = (_dictionary.length & positionMask) << _literalContextBits;
-    var probabilities = _literalProbabilities[low + high];
+    var probabilities = _literalTable[low + high];
 
     int value;
     if (_prevPacketIsLiteral()) {
@@ -259,9 +256,8 @@ class LzmaDecoder {
   // Decode a packet that repeats a match already done.
   void _decodeRepeat(int posState) {
     int distance;
-    if (_input.readBit(_repeat0Probabilities, state.index) == 0) {
-      if (_input.readBit(_longRepeat0Probabilities[state.index], posState) ==
-          0) {
+    if (_input.readBit(_repeat0Table, state.index) == 0) {
+      if (_input.readBit(_longRepeat0Table[state.index], posState) == 0) {
         _repeatData(_distance0, 1);
         state = _prevPacketIsLiteral()
             ? _LzmaState.Lit_ShortRep
@@ -270,11 +266,11 @@ class LzmaDecoder {
       } else {
         distance = _distance0;
       }
-    } else if (_input.readBit(_repeat1Probabilities, state.index) == 0) {
+    } else if (_input.readBit(_repeat1Table, state.index) == 0) {
       distance = _distance1;
       _distance1 = _distance0;
       _distance0 = distance;
-    } else if (_input.readBit(_repeat2Probabilities, state.index) == 0) {
+    } else if (_input.readBit(_repeat2Table, state.index) == 0) {
       distance = _distance2;
       _distance2 = _distance1;
       _distance1 = _distance0;
@@ -325,59 +321,59 @@ class _LengthDecoder {
   // Data being read from.
   final RangeDecoder _input;
 
-  // Probabilities
-  late final RangeDecoderProbabilities formProbabilities;
+  // Bit probabilities for the length form.
+  late final RangeDecoderTable formTable;
 
   // Bit probabilities when lengths are in the short form (2-9).
-  late final List<RangeDecoderProbabilities> shortProbabilities;
+  late final List<RangeDecoderTable> shortTable;
 
   // Bit probabilities when lengths are in the medium form (10-17).
-  late final List<RangeDecoderProbabilities> mediumProbabilities;
+  late final List<RangeDecoderTable> mediumTable;
 
   // Bit probabilities when lengths are in the long form (18-273).
-  late final RangeDecoderProbabilities longProbabilities;
+  late final RangeDecoderTable longTable;
 
   _LengthDecoder(this._input, int positionCount) {
-    formProbabilities = RangeDecoderProbabilities(2);
-    shortProbabilities = <RangeDecoderProbabilities>[];
-    mediumProbabilities = <RangeDecoderProbabilities>[];
-    longProbabilities = RangeDecoderProbabilities(256);
+    formTable = RangeDecoderTable(2);
+    shortTable = <RangeDecoderTable>[];
+    mediumTable = <RangeDecoderTable>[];
+    longTable = RangeDecoderTable(256);
 
     reset(positionCount);
   }
 
   // Reset this decoder.
   void reset(int positionCount) {
-    formProbabilities.reset();
-    if (positionCount != shortProbabilities.length) {
-      shortProbabilities.clear();
-      mediumProbabilities.clear();
+    formTable.reset();
+    if (positionCount != shortTable.length) {
+      shortTable.clear();
+      mediumTable.clear();
       for (var i = 0; i < positionCount; i++) {
-        shortProbabilities.add(RangeDecoderProbabilities(8));
-        mediumProbabilities.add(RangeDecoderProbabilities(8));
+        shortTable.add(RangeDecoderTable(8));
+        mediumTable.add(RangeDecoderTable(8));
       }
     } else {
-      for (var tree in shortProbabilities) {
-        tree.reset();
+      for (var table in shortTable) {
+        table.reset();
       }
-      for (var tree in mediumProbabilities) {
-        tree.reset();
+      for (var table in mediumTable) {
+        table.reset();
       }
     }
-    longProbabilities.reset();
+    longTable.reset();
   }
 
   // Read a length field.
   int readLength(int posState) {
-    if (_input.readBit(formProbabilities, 0) == 0) {
+    if (_input.readBit(formTable, 0) == 0) {
       // 0xxx - Length 2 - 9
-      return 2 + _input.readBittree(shortProbabilities[posState], 3);
-    } else if (_input.readBit(formProbabilities, 1) == 0) {
+      return 2 + _input.readBittree(shortTable[posState], 3);
+    } else if (_input.readBit(formTable, 1) == 0) {
       // 10xxx - Length 10 - 17
-      return 10 + _input.readBittree(mediumProbabilities[posState], 3);
+      return 10 + _input.readBittree(mediumTable[posState], 3);
     } else {
       // 11xxxxxxxx - Length 18 - 273
-      return 18 + _input.readBittree(longProbabilities, 8);
+      return 18 + _input.readBittree(longTable, 8);
     }
   }
 }
@@ -394,48 +390,48 @@ class _DistanceDecoder {
   final RangeDecoder _input;
 
   // Bit probabilities for the 6 bit slot.
-  late final List<RangeDecoderProbabilities> _slotProbabilities;
+  late final List<RangeDecoderTable> _slotTable;
 
   // Bit probabilities for slots 4-13.
-  late final List<RangeDecoderProbabilities> _shortProbabilities;
+  late final List<RangeDecoderTable> _shortTable;
 
   // Bit probabilities for slots 14-63.
-  late final RangeDecoderProbabilities _longProbabilities;
+  late final RangeDecoderTable _longTable;
 
   _DistanceDecoder(this._input) {
-    _slotProbabilities = <RangeDecoderProbabilities>[];
+    _slotTable = <RangeDecoderTable>[];
     var slotSize = 1 << _slotBitCount;
     for (var i = 0; i < 4; i++) {
-      _slotProbabilities.add(RangeDecoderProbabilities(slotSize));
+      _slotTable.add(RangeDecoderTable(slotSize));
     }
-    _shortProbabilities = <RangeDecoderProbabilities>[];
+    _shortTable = <RangeDecoderTable>[];
     for (var slot = 4; slot < 14; slot++) {
       var bitCount = (slot ~/ 2) - 1;
-      _shortProbabilities.add(RangeDecoderProbabilities(1 << bitCount));
+      _shortTable.add(RangeDecoderTable(1 << bitCount));
     }
     var alignSize = 1 << _alignBitCount;
-    _longProbabilities = RangeDecoderProbabilities(alignSize);
+    _longTable = RangeDecoderTable(alignSize);
   }
 
   // Reset this decoder.
   void reset() {
-    for (var tree in _slotProbabilities) {
-      tree.reset();
+    for (var table in _slotTable) {
+      table.reset();
     }
-    for (var tree in _shortProbabilities) {
-      tree.reset();
+    for (var table in _shortTable) {
+      table.reset();
     }
-    _longProbabilities.reset();
+    _longTable.reset();
   }
 
   // Reads a distance field.
   // [length] is a match length (minimum of 2).
   int readDistance(int length) {
     var distState = length - 2;
-    if (distState >= _slotProbabilities.length) {
-      distState = _slotProbabilities.length - 1;
+    if (distState >= _slotTable.length) {
+      distState = _slotTable.length - 1;
     }
-    var probabilities = _slotProbabilities[distState];
+    var probabilities = _slotTable[distState];
 
     // Distances are encoded starting with a six bit slot.
     var slot = _input.readBittree(probabilities, _slotBitCount);
@@ -452,14 +448,13 @@ class _DistanceDecoder {
     // Short distances are stored in reverse bittree format.
     if (slot < 14) {
       return prefix << bitCount |
-          _input.readBittreeReverse(_shortProbabilities[slot - 4], bitCount);
+          _input.readBittreeReverse(_shortTable[slot - 4], bitCount);
     }
 
     // Large distances are a combination of direct bits and reverse bittree format.
     var directCount = bitCount - _alignBitCount;
     var directBits = _input.readDirect(directCount);
-    var alignBits =
-        _input.readBittreeReverse(_longProbabilities, _alignBitCount);
+    var alignBits = _input.readBittreeReverse(_longTable, _alignBitCount);
     return prefix << bitCount | directBits << _alignBitCount | alignBits;
   }
 }
