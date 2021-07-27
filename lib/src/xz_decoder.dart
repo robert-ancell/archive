@@ -197,11 +197,11 @@ class XZDecoder {
         }
 
         var decoder = LzmaDecoder(
-            input: input.readBytes(compressedLength),
             literalContextBits: literalContextBits,
             literalPositionBits: literalPositionBits,
             positionBits: positionBits);
-        data.addAll(decoder.decode(uncompressedLength));
+        data.addAll(decoder.decode(
+            input.readBytes(compressedLength), uncompressedLength));
       }
     }
   }

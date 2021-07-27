@@ -47,17 +47,14 @@ class LzmaDecoder {
   // Decoded data, which is able to be copied.
   final _dictionary = <int>[];
 
-  /// Creates an LZMA decoder reading from [input] which contains data compressed with the LZMA algorithm.
+  /// Creates an LZMA decoder.
   LzmaDecoder(
-      {required InputStreamBase input,
-      required int positionBits,
+      {required int positionBits,
       required int literalPositionBits,
       required int literalContextBits})
       : _positionBits = positionBits,
         _literalPositionBits = literalPositionBits,
         _literalContextBits = literalContextBits {
-    _input.input = input;
-
     _nonLiteralProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _nonLiteralProbabilities
@@ -123,8 +120,10 @@ class LzmaDecoder {
     }
   }
 
-  // Decode [uncompressedLength] bytes of LZMA data.
-  List<int> decode(int uncompressedLength) {
+  // Decode [input] which contains compressed LZMA data that unpacks to [uncompressedLength] bytes.
+  List<int> decode(InputStreamBase input, int uncompressedLength) {
+    _input.input = input;
+
     var initialSize = _dictionary.length;
     var finalSize = initialSize + uncompressedLength;
 
