@@ -27,17 +27,6 @@ const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
 /// FIXME: Kill
 const int LITERAL_CODER_SIZE = 0x300;
 
-const int MATCH_LEN_MIN = 2;
-const int LEN_LOW_BITS = 3;
-const int LEN_LOW_SYMBOLS = (1 << LEN_LOW_BITS);
-const int LEN_MID_BITS = 3;
-const int LEN_MID_SYMBOLS = (1 << LEN_MID_BITS);
-const int LEN_HIGH_BITS = 8;
-const int LEN_HIGH_SYMBOLS = (1 << LEN_HIGH_BITS);
-
-const int ALIGN_BITS = 4;
-const int ALIGN_SIZE = (1 << ALIGN_BITS);
-
 class LzmaDecoder {
   // Compressed data.
   late final RangeDecoder _input;
@@ -401,7 +390,16 @@ class RangeDecoder {
   }
 }
 
+const int MATCH_LEN_MIN = 2;
+
 class LengthDecoder {
+  static const int LEN_LOW_BITS = 3;
+  static const int LEN_LOW_SYMBOLS = (1 << LEN_LOW_BITS);
+  static const int LEN_MID_BITS = 3;
+  static const int LEN_MID_SYMBOLS = (1 << LEN_MID_BITS);
+  static const int LEN_HIGH_BITS = 8;
+  static const int LEN_HIGH_SYMBOLS = (1 << LEN_HIGH_BITS);
+
   final RangeDecoder _input;
 
   // Probabilty trees for decoding lengths.
@@ -435,10 +433,10 @@ class LengthDecoder {
   }
 
   int readLength(int posState) {
-    int minLength;
     int limit;
     List<int> probabilities;
 
+    int minLength;
     if (_input.readBit(lengthChoice, 0) == 0) {
       minLength = MATCH_LEN_MIN;
       limit = LEN_LOW_SYMBOLS;
@@ -457,17 +455,20 @@ class LengthDecoder {
   }
 }
 
-// FIXME: Kill
-const int DIST_STATES = 4;
-const int DIST_SLOT_BITS = 6;
-const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
-
-const int DIST_MODEL_START = 4;
-const int DIST_MODEL_END = 14;
-const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
-const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
-
 class DistanceDecoder {
+// FIXME: Kill
+  static const int DIST_STATES = 4;
+  static const int DIST_SLOT_BITS = 6;
+  static const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
+
+  static const int DIST_MODEL_START = 4;
+  static const int DIST_MODEL_END = 14;
+  static const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
+  static const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
+
+  static const int ALIGN_BITS = 4;
+  static const int ALIGN_SIZE = (1 << ALIGN_BITS);
+
   final RangeDecoder _input;
   late final List<List<int>> dist_slot;
   late final List<int> dist_special;
