@@ -38,14 +38,14 @@ class LzmaDecoder {
   final int _literalContextBits;
 
   // Probabilty trees
-  late final List<List<int>> _matchProbabilities;
-  late final List<int> _repeatProbabilities;
-  late final List<int> _repeat0Probabilities;
-  late final List<List<int>> _longRepeat0Probabilities;
-  late final List<int> _repeat1Probabilities;
-  late final List<int> _repeat2Probabilities;
+  late final List<RangeDecoderProbabilities> _matchProbabilities;
+  late final RangeDecoderProbabilities _repeatProbabilities;
+  late final RangeDecoderProbabilities _repeat0Probabilities;
+  late final List<RangeDecoderProbabilities> _longRepeat0Probabilities;
+  late final RangeDecoderProbabilities _repeat1Probabilities;
+  late final RangeDecoderProbabilities _repeat2Probabilities;
 
-  late final List<List<int>> _literalProbabilities;
+  late final List<RangeDecoderProbabilities> _literalProbabilities;
 
   late final LengthDecoder _matchLengthDecoder;
   late final LengthDecoder _repeatLengthDecoder;
@@ -73,27 +73,24 @@ class LzmaDecoder {
 
     _output = List<int>.filled(uncompressedLength, 0);
 
-    _matchProbabilities = <List<int>>[];
+    _matchProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _matchProbabilities
-          .add(_input.makeProbabilityTree(_LzmaState.values.length));
+          .add(RangeDecoderProbabilities(_LzmaState.values.length));
     }
-    _repeatProbabilities = _input.makeProbabilityTree(_LzmaState.values.length);
-    _repeat0Probabilities =
-        _input.makeProbabilityTree(_LzmaState.values.length);
-    _longRepeat0Probabilities = <List<int>>[];
+    _repeatProbabilities = RangeDecoderProbabilities(_LzmaState.values.length);
+    _repeat0Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
+    _longRepeat0Probabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _longRepeat0Probabilities
-          .add(_input.makeProbabilityTree(_LzmaState.values.length));
+          .add(RangeDecoderProbabilities(_LzmaState.values.length));
     }
-    _repeat1Probabilities =
-        _input.makeProbabilityTree(_LzmaState.values.length);
-    _repeat2Probabilities =
-        _input.makeProbabilityTree(_LzmaState.values.length);
-    _literalProbabilities = <List<int>>[];
+    _repeat1Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
+    _repeat2Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
+    _literalProbabilities = <RangeDecoderProbabilities>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralCodes; i++) {
-      _literalProbabilities.add(_input.makeProbabilityTree(LITERAL_CODER_SIZE));
+      _literalProbabilities.add(RangeDecoderProbabilities(LITERAL_CODER_SIZE));
     }
 
     _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
@@ -111,17 +108,17 @@ class LzmaDecoder {
     distance3 = 0;
 
     for (var tree in _matchProbabilities) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
-    _input.resetProbabilityTree(_repeatProbabilities);
-    _input.resetProbabilityTree(_repeat0Probabilities);
+    _repeatProbabilities.reset();
+    _repeat0Probabilities.reset();
     for (var tree in _longRepeat0Probabilities) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
-    _input.resetProbabilityTree(_repeat1Probabilities);
-    _input.resetProbabilityTree(_repeat2Probabilities);
+    _repeat1Probabilities.reset();
+    _repeat2Probabilities.reset();
     for (var tree in _literalProbabilities) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
 
     _matchLengthDecoder.reset();
@@ -338,37 +335,37 @@ class LengthDecoder {
   final RangeDecoder _input;
 
   // Probabilty trees for decoding lengths.
-  late final List<int> lengthChoice;
-  late final List<List<int>> low;
-  late final List<List<int>> mid;
-  late final List<int> high;
+  late final RangeDecoderProbabilities lengthChoice;
+  late final List<RangeDecoderProbabilities> low;
+  late final List<RangeDecoderProbabilities> mid;
+  late final RangeDecoderProbabilities high;
 
   LengthDecoder(this._input, {required int positionBits}) {
-    lengthChoice = _input.makeProbabilityTree(2);
-    low = <List<int>>[];
-    mid = <List<int>>[];
+    lengthChoice = RangeDecoderProbabilities(2);
+    low = <RangeDecoderProbabilities>[];
+    mid = <RangeDecoderProbabilities>[];
     for (var i = 0; i < 1 << positionBits; i++) {
-      low.add(_input.makeProbabilityTree(LEN_LOW_SYMBOLS));
-      mid.add(_input.makeProbabilityTree(LEN_MID_SYMBOLS));
+      low.add(RangeDecoderProbabilities(LEN_LOW_SYMBOLS));
+      mid.add(RangeDecoderProbabilities(LEN_MID_SYMBOLS));
     }
-    high = _input.makeProbabilityTree(LEN_HIGH_SYMBOLS);
+    high = RangeDecoderProbabilities(LEN_HIGH_SYMBOLS);
     reset();
   }
 
   void reset() {
-    _input.resetProbabilityTree(lengthChoice);
+    lengthChoice.reset();
     for (var tree in low) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
     for (var tree in mid) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
-    _input.resetProbabilityTree(high);
+    high.reset();
   }
 
   int readLength(int posState) {
     int limit;
-    List<int> probabilities;
+    RangeDecoderProbabilities probabilities;
 
     int minLength;
     if (_input.readBit(lengthChoice, 0) == 0) {
@@ -401,28 +398,28 @@ class DistanceDecoder {
   static const int ALIGN_BITS = 4;
 
   final RangeDecoder _input;
-  late final List<List<int>> dist_slot;
-  late final List<int> dist_special;
-  late final List<int> dist_align;
+  late final List<RangeDecoderProbabilities> dist_slot;
+  late final RangeDecoderProbabilities dist_special;
+  late final RangeDecoderProbabilities dist_align;
 
   DistanceDecoder(this._input) {
-    dist_slot = <List<int>>[];
+    dist_slot = <RangeDecoderProbabilities>[];
     for (var i = 0; i < DIST_STATES; i++) {
-      dist_slot.add(_input.makeProbabilityTree(DIST_SLOTS));
+      dist_slot.add(RangeDecoderProbabilities(DIST_SLOTS));
     }
     var fullDistancesBits = (DIST_MODEL_END ~/ 2);
     var fullDistances = (1 << fullDistancesBits);
-    dist_special = _input.makeProbabilityTree(fullDistances - DIST_MODEL_END);
+    dist_special = RangeDecoderProbabilities(fullDistances - DIST_MODEL_END);
     var alignSize = 1 << ALIGN_BITS;
-    dist_align = _input.makeProbabilityTree(alignSize);
+    dist_align = RangeDecoderProbabilities(alignSize);
   }
 
   void reset() {
     for (var tree in dist_slot) {
-      _input.resetProbabilityTree(tree);
+      tree.reset();
     }
-    _input.resetProbabilityTree(dist_special);
-    _input.resetProbabilityTree(dist_align);
+    dist_special.reset();
+    dist_align.reset();
   }
 
   int readDistance(int length) {

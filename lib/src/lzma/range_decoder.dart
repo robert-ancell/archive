@@ -1,13 +1,26 @@
 import '../util/input_stream.dart';
 
+const int RC_BIT_MODEL_TOTAL_BITS = 11;
+const int RC_BIT_MODEL_TOTAL = (1 << RC_BIT_MODEL_TOTAL_BITS);
+const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
+
+class RangeDecoderProbabilities {
+  // FIXME: uint16
+  final List<int> probabilities;
+
+  RangeDecoderProbabilities(int length)
+      : probabilities = List<int>.filled(length, DEFAULT_PROB);
+
+  void reset() {
+    probabilities.fillRange(0, probabilities.length, DEFAULT_PROB);
+  }
+}
+
 class RangeDecoder {
   static const int RC_SHIFT_BITS = 8;
   static const int RC_TOP_BITS = 24;
   static const int RC_TOP_VALUE = (1 << RC_TOP_BITS);
-  static const int RC_BIT_MODEL_TOTAL_BITS = 11;
-  static const int RC_BIT_MODEL_TOTAL = (1 << RC_BIT_MODEL_TOTAL_BITS);
   static const int RC_MOVE_BITS = 5;
-  static const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
 
   final InputStreamBase _input;
   var range = 0xffffffff;
@@ -20,33 +33,25 @@ class RangeDecoder {
     }
   }
 
-  // FIXME: uint16
-  List<int> makeProbabilityTree(int length) {
-    return List<int>.filled(length, DEFAULT_PROB);
-  }
-
-  void resetProbabilityTree(List<int> probabilities) {
-    probabilities.fillRange(0, probabilities.length, DEFAULT_PROB);
-  }
-
-  int readBit(List<int> probabilities, int index) {
+  int readBit(RangeDecoderProbabilities probabilities, int index) {
     _normalize();
 
-    var p = probabilities[index];
+    var p = probabilities.probabilities[index];
     var bound = (range >> RC_BIT_MODEL_TOTAL_BITS) * p;
     if (code < bound) {
       range = bound;
-      probabilities[index] += (RC_BIT_MODEL_TOTAL - p) >> RC_MOVE_BITS;
+      probabilities.probabilities[index] +=
+          (RC_BIT_MODEL_TOTAL - p) >> RC_MOVE_BITS;
       return 0;
     } else {
       range -= bound;
       code -= bound;
-      probabilities[index] -= p >> RC_MOVE_BITS;
+      probabilities.probabilities[index] -= p >> RC_MOVE_BITS;
       return 1;
     }
   }
 
-  int readBittree(List<int> probabilities, int limit) {
+  int readBittree(RangeDecoderProbabilities probabilities, int limit) {
     var symbol = 1;
     while (true) {
       var b = readBit(probabilities, symbol);
@@ -57,8 +62,8 @@ class RangeDecoder {
     }
   }
 
-  int readBittreeReverse(
-      List<int> probabilities, int offset, int value, int limit) {
+  int readBittreeReverse(RangeDecoderProbabilities probabilities, int offset,
+      int value, int limit) {
     var symbol = 1;
     for (var i = 0; i < limit; i++) {
       var b = readBit(probabilities, offset + symbol);
