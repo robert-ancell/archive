@@ -24,8 +24,6 @@ const int RC_MOVE_BITS = 5;
 
 const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
 
-const int POS_STATES_MAX = (1 << 4);
-
 const int LITERAL_CODER_SIZE = 0x300;
 const int LITERAL_CODERS_MAX = (1 << 4);
 
@@ -102,8 +100,8 @@ class LzmaDecoder {
     _positionMask = (1 << positionBits) - 1;
     _literalPositionMask = (1 << literalPositionBits) - 1;
 
-    _matchLengthDecoder = LengthDecoder(_input);
-    _repeatLengthDecoder = LengthDecoder(_input);
+    _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
+    _repeatLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
 
     reset();
   }
@@ -447,11 +445,11 @@ class LengthDecoder {
   late final List<List<int>> mid;
   late final List<int> high;
 
-  LengthDecoder(this._input) {
+  LengthDecoder(this._input, {required int positionBits}) {
     lengthChoice = [DEFAULT_PROB, DEFAULT_PROB];
     low = <List<int>>[];
     mid = <List<int>>[];
-    for (var i = 0; i < POS_STATES_MAX; i++) {
+    for (var i = 0; i < 1 << positionBits; i++) {
       low.add(List<int>.filled(LEN_LOW_SYMBOLS, DEFAULT_PROB));
       mid.add(List<int>.filled(LEN_MID_SYMBOLS, DEFAULT_PROB));
     }
@@ -462,8 +460,10 @@ class LengthDecoder {
   void reset() {
     lengthChoice[0] = DEFAULT_PROB;
     lengthChoice[1] = DEFAULT_PROB;
-    for (var i = 0; i < POS_STATES_MAX; i++) {
+    for (var i = 0; i < low.length; i++) {
       low[i].fillRange(0, low[i].length, DEFAULT_PROB);
+    }
+    for (var i = 0; i < mid.length; i++) {
       mid[i].fillRange(0, mid[i].length, DEFAULT_PROB);
     }
     high.fillRange(0, high.length, DEFAULT_PROB);
