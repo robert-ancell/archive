@@ -66,7 +66,7 @@ class LzmaDecoder {
   late final List<List<int>> is_match;
   late final List<int> is_rep;
   late final List<int> is_rep0;
-  late final List<int> is_rep0_long;
+  late final List<List<int>> is_rep0_long;
   late final List<int> is_rep1;
   late final List<int> is_rep2;
 
@@ -79,7 +79,7 @@ class LzmaDecoder {
   late final LengthDecoder _matchLengthDecoder;
   late final LengthDecoder _repeatLengthDecoder;
 
-  // Last four distances used in matches.
+  // Distances used in matches that can be repeated.
   var rep0 = 0;
   var rep1 = 0;
   var rep2 = 0;
@@ -87,6 +87,7 @@ class LzmaDecoder {
 
   var state = LzmaState.Lit_Lit;
 
+  /// Creates an LZMA decoder reading from [input] which contains data of length [uncompressedLength] compressed with the LZMA algorithm.
   LzmaDecoder(
       {required InputStreamBase input,
       required int uncompressedLength,
@@ -120,7 +121,10 @@ class LzmaDecoder {
     }
     is_rep = List<int>.filled(16, DEFAULT_PROB);
     is_rep0 = List<int>.filled(16, DEFAULT_PROB);
-    is_rep0_long = List<int>.filled(16, DEFAULT_PROB);
+    is_rep0_long = <List<int>>[];
+    for (var i = 0; i < LzmaState.values.length; i++) {
+      is_rep0_long.add(List<int>.filled(16, DEFAULT_PROB));
+    }
     is_rep1 = List<int>.filled(16, DEFAULT_PROB);
     is_rep2 = List<int>.filled(16, DEFAULT_PROB);
     literal = <List<int>>[];
@@ -177,10 +181,11 @@ class LzmaDecoder {
       case LzmaState.Lit_ShortRep:
       case LzmaState.NonLit_Match:
       case LzmaState.NonLit_Rep:
-        symbol = 1;
+        // Get the last byte before this match.
         var matchByte = _output[_outputPosition - rep0 - 1] << 1;
-        var offset = 0x100;
 
+        symbol = 1;
+        var offset = 0x100;
         while (true) {
           var matchBit = matchByte & offset;
           matchByte <<= 1;
@@ -191,7 +196,7 @@ class LzmaDecoder {
           if (b != 0) {
             offset &= matchBit;
           } else {
-            offset &= ~matchBit;
+            offset &= matchBit ^ 0xffffffff;
           }
           if (symbol >= 0x100) {
             symbol &= 0xff;
@@ -228,7 +233,7 @@ class LzmaDecoder {
         break;
       case LzmaState.Lit_LongRep:
       case LzmaState.NonLit_Rep:
-        state = LzmaState.Rep_Lit; // FIXME: Or ShortRep_Lit?
+        state = LzmaState.Rep_Lit;
         break;
       case LzmaState.Lit_ShortRep:
         state = LzmaState.ShortRep_Lit;
@@ -297,7 +302,7 @@ class LzmaDecoder {
     int distance;
     var literalState = LzmaState.Lit_LongRep;
     if (_input.readBit(is_rep0, state.index) == 0) {
-      if (_input.readBit(is_rep0_long, 0) == 0) {
+      if (_input.readBit(is_rep0_long[state.index], posState) == 0) {
         literalState = LzmaState.Lit_ShortRep;
         length = 1;
         distance = 0;
