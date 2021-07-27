@@ -7,13 +7,13 @@ class LzmaDecoder {
   final _input = RangeDecoder();
 
   // Number of bits used from [_dictionary] length for probabilities.
-  final int _positionBits;
+  int _positionBits = 2;
 
   // Number of bits used from [_dictionary] length for literal probabilities.
-  final int _literalPositionBits;
+  int _literalPositionBits = 0;
 
   // Number of bits used from [_dictionary] for literal probabilities.
-  final int _literalContextBits;
+  int _literalContextBits = 3;
 
   // Bit probabilities for determining which LZMA packet is present.
   late final List<RangeDecoderProbabilities> _nonLiteralProbabilities;
@@ -48,13 +48,7 @@ class LzmaDecoder {
   final _dictionary = <int>[];
 
   /// Creates an LZMA decoder.
-  LzmaDecoder(
-      {required int positionBits,
-      required int literalPositionBits,
-      required int literalContextBits})
-      : _positionBits = positionBits,
-        _literalPositionBits = literalPositionBits,
-        _literalContextBits = literalContextBits {
+  LzmaDecoder() {
     _nonLiteralProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
       _nonLiteralProbabilities
@@ -70,16 +64,8 @@ class LzmaDecoder {
     _repeat1Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
     _repeat2Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
     _literalProbabilities = <List<RangeDecoderProbabilities>>[];
-    var maxLiteralStates = 1 << (literalPositionBits + literalContextBits);
-    for (var i = 0; i < maxLiteralStates; i++) {
-      _literalProbabilities.add([
-        RangeDecoderProbabilities(256),
-        RangeDecoderProbabilities(256),
-        RangeDecoderProbabilities(256)
-      ]);
-    }
 
-    var positionCount = 1 << positionBits;
+    var positionCount = 1 << _positionBits;
     _matchLengthDecoder = _LengthDecoder(_input, positionCount);
     _repeatLengthDecoder = _LengthDecoder(_input, positionCount);
     _distanceDecoder = _DistanceDecoder(_input);
@@ -88,12 +74,32 @@ class LzmaDecoder {
   }
 
   // Reset the decoder.
-  void reset({bool resetDictionary = false}) {
+  void reset(
+      {int? positionBits,
+      int? literalPositionBits,
+      int? literalContextBits,
+      bool resetDictionary = false}) {
+    _positionBits = positionBits ?? _positionBits;
+    _literalPositionBits = literalPositionBits ?? _literalPositionBits;
+    _literalContextBits = literalContextBits ?? _literalContextBits;
+
     state = _LzmaState.Lit_Lit;
     _distance0 = 0;
     _distance1 = 0;
     _distance2 = 0;
     _distance3 = 0;
+
+    var maxLiteralStates = 1 << (_literalPositionBits + _literalContextBits);
+    if (_literalProbabilities.length != maxLiteralStates) {
+      _literalProbabilities.clear();
+      for (var i = 0; i < maxLiteralStates; i++) {
+        _literalProbabilities.add([
+          RangeDecoderProbabilities(256),
+          RangeDecoderProbabilities(256),
+          RangeDecoderProbabilities(256)
+        ]);
+      }
+    }
 
     for (var tree in _nonLiteralProbabilities) {
       tree.reset();
@@ -111,8 +117,9 @@ class LzmaDecoder {
       tree[2].reset();
     }
 
-    _matchLengthDecoder.reset();
-    _repeatLengthDecoder.reset();
+    var positionCount = 1 << _positionBits;
+    _matchLengthDecoder.reset(positionCount);
+    _repeatLengthDecoder.reset(positionCount);
     _distanceDecoder.reset();
 
     if (resetDictionary) {
@@ -334,23 +341,28 @@ class _LengthDecoder {
     formProbabilities = RangeDecoderProbabilities(2);
     shortProbabilities = <RangeDecoderProbabilities>[];
     mediumProbabilities = <RangeDecoderProbabilities>[];
-    for (var i = 0; i < positionCount; i++) {
-      shortProbabilities.add(RangeDecoderProbabilities(8));
-      mediumProbabilities.add(RangeDecoderProbabilities(8));
-    }
     longProbabilities = RangeDecoderProbabilities(256);
 
-    reset();
+    reset(positionCount);
   }
 
   // Reset this decoder.
-  void reset() {
+  void reset(int positionCount) {
     formProbabilities.reset();
-    for (var tree in shortProbabilities) {
-      tree.reset();
-    }
-    for (var tree in mediumProbabilities) {
-      tree.reset();
+    if (positionCount != shortProbabilities.length) {
+      shortProbabilities.clear();
+      mediumProbabilities.clear();
+      for (var i = 0; i < positionCount; i++) {
+        shortProbabilities.add(RangeDecoderProbabilities(8));
+        mediumProbabilities.add(RangeDecoderProbabilities(8));
+      }
+    } else {
+      for (var tree in shortProbabilities) {
+        tree.reset();
+      }
+      for (var tree in mediumProbabilities) {
+        tree.reset();
+      }
     }
     longProbabilities.reset();
   }

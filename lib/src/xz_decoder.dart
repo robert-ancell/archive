@@ -18,6 +18,12 @@ class XZDecoder {
 
 /// Decodes an XZ stream.
 class _XZStreamDecoder {
+  // Decoded data.
+  final data = <int>[];
+
+  // LZMA decoder.
+  final decoder = LzmaDecoder();
+
   // Decode this stream and return the uncompressed data.
   List<int> decode(InputStreamBase input) {
     var flags = _readStreamHeader(input);
@@ -40,6 +46,8 @@ class _XZStreamDecoder {
       var block = _readBlock(input, blockLength, flags & 0xf);
       blocks.add(block);
     }
+
+    return data;
   }
 
   // Reads an XZ steam header from [input] and returns the stream flags.
@@ -182,6 +190,7 @@ class _XZStreamDecoder {
       // 1rrxxxxx - LZMA data with reset (r) and bits 16-20 of size (x)
       if (control & 0x80 == 0) {
         if (control == 0) {
+          decoder.reset(resetDictionary: true);
           return data;
         } else if (control == 1) {
           var length = input.readByte() << 8 | input.readByte() + 1;
@@ -190,26 +199,35 @@ class _XZStreamDecoder {
           throw ArchiveException('Unknown LZMA2 control code $control');
         }
       } else {
+        // Reset flags:
+        // 0 - reset nothing
+        // 1 - reset state
+        // 2 - reset state, properties
+        // 3 - reset state, properties and dictionary
         var reset = (control >> 5) & 0x3;
         var uncompressedLength = (control & 0x1f) << 16 |
             input.readByte() << 8 |
             input.readByte() + 1;
         var compressedLength = input.readByte() << 8 | input.readByte() + 1;
-        var literalContextBits = 0;
-        var literalPositionBits = 0;
-        var positionBits = 0;
+        int? literalContextBits;
+        int? literalPositionBits;
+        int? positionBits;
         if (reset >= 2) {
+          // The three LZMA decoder properties are combined into a single number.
           var properties = input.readByte();
           positionBits = properties ~/ 45;
           properties -= positionBits * 45;
           literalPositionBits = properties ~/ 9;
           literalContextBits = properties - literalPositionBits * 8;
         }
+        if (reset > 0) {
+          decoder.reset(
+              literalContextBits: literalContextBits,
+              literalPositionBits: literalPositionBits,
+              positionBits: positionBits,
+              resetDictionary: reset == 3);
+        }
 
-        var decoder = LzmaDecoder(
-            literalContextBits: literalContextBits,
-            literalPositionBits: literalPositionBits,
-            positionBits: positionBits);
         data.addAll(decoder.decode(
             input.readBytes(compressedLength), uncompressedLength));
       }
