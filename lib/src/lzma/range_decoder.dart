@@ -53,23 +53,23 @@ class RangeDecoder {
 
   int readBittree(RangeDecoderProbabilities probabilities, int count) {
     var value = 0;
-    var symbol = 1;
+    var symbolPrefix = 1;
     for (var i = 0; i < count; i++) {
-      var b = readBit(probabilities, symbol);
+      var b = readBit(probabilities, symbolPrefix | value);
       value = (value << 1) | b;
-      symbol = (symbol << 1) | b;
+      symbolPrefix <<= 1;
     }
 
     return value;
   }
 
   int readBittreeReverse(RangeDecoderProbabilities probabilities, int count) {
-    var symbol = 1;
     var value = 0;
+    var symbolPrefix = 1;
     for (var i = 0; i < count; i++) {
-      var b = readBit(probabilities, symbol);
-      symbol = (symbol << 1) | b;
+      var b = readBit(probabilities, symbolPrefix | value);
       value |= b << i;
+      symbolPrefix <<= 1;
     }
 
     return value;

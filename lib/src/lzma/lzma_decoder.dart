@@ -28,7 +28,7 @@ class LzmaDecoder {
   late final RangeDecoderProbabilities _repeat2Probabilities;
 
   // Bit probabilities when decoding literals.
-  late final List<RangeDecoderProbabilities> _literalProbabilities;
+  late final List<List<RangeDecoderProbabilities>> _literalProbabilities;
 
   // Decoder to read length fields in match packets.
   late final _LengthDecoder _matchLengthDecoder;
@@ -76,13 +76,14 @@ class LzmaDecoder {
     }
     _repeat1Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
     _repeat2Probabilities = RangeDecoderProbabilities(_LzmaState.values.length);
-    _literalProbabilities = <RangeDecoderProbabilities>[];
-
-    /// FIXME: Kill
-    const int LITERAL_CODER_SIZE = 0x300;
+    _literalProbabilities = <List<RangeDecoderProbabilities>>[];
     var maxLiteralStates = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralStates; i++) {
-      _literalProbabilities.add(RangeDecoderProbabilities(LITERAL_CODER_SIZE));
+      _literalProbabilities.add([
+        RangeDecoderProbabilities(256),
+        RangeDecoderProbabilities(256),
+        RangeDecoderProbabilities(256)
+      ]);
     }
 
     var positionCount = 1 << positionBits;
@@ -111,7 +112,9 @@ class LzmaDecoder {
     _repeat1Probabilities.reset();
     _repeat2Probabilities.reset();
     for (var tree in _literalProbabilities) {
-      tree.reset();
+      tree[0].reset();
+      tree[1].reset();
+      tree[2].reset();
     }
 
     _matchLengthDecoder.reset();
@@ -166,36 +169,33 @@ class LzmaDecoder {
     var high = (_outputPosition & positionMask) << _literalContextBits;
     var probabilities = _literalProbabilities[low + high];
 
-    int symbol;
+    int value;
     if (_prevPacketIsLiteral()) {
-      symbol = _input.readBittree(probabilities, 8);
+      value = _input.readBittree(probabilities[0], 8);
     } else {
-      // Get the last byte before this match.
-      var matchByte = _output[_outputPosition - distance0 - 1] << 1;
+      // Get the last byte before the match that just occurred.
+      prevByte = _output[_outputPosition - distance0 - 1];
 
-      symbol = 1;
-      var offset = 0x100;
-      while (true) {
-        var matchBit = matchByte & offset;
-        matchByte <<= 1;
-        var i = offset + matchBit + symbol;
-
-        var b = _input.readBit(probabilities, i);
-        symbol = (symbol << 1) | b;
-        if (b != 0) {
-          offset &= matchBit;
+      value = 0;
+      var symbolPrefix = 1;
+      var matched = true;
+      for (var i = 0; i < 8; i++) {
+        int b;
+        if (matched) {
+          var matchBit = (prevByte >> 7) & 0x1;
+          prevByte <<= 1;
+          b = _input.readBit(probabilities[1 + matchBit], symbolPrefix | value);
+          matched = b == matchBit;
         } else {
-          offset &= matchBit ^ 0xffffffff;
+          b = _input.readBit(probabilities[0], symbolPrefix | value);
         }
-        if (symbol >= 0x100) {
-          symbol &= 0xff;
-          break;
-        }
+        value = (value << 1) | b;
+        symbolPrefix <<= 1;
       }
     }
 
     // Add new byte to the output.
-    _output[_outputPosition] = symbol;
+    _output[_outputPosition] = value;
     _outputPosition++;
 
     switch (state) {
