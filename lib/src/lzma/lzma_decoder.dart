@@ -410,12 +410,12 @@ class _DistanceDecoder {
 
     if (slot < DIST_MODEL_END) {
       distance <<= limit;
-      return _input.readBittreeReverse(
-          dist_special, distance - slot - 1, distance, limit);
+      return distance |
+          _input.readBittreeReverse(dist_special, distance - slot - 1, limit);
     } else {
       distance = _input.readDirect(distance, limit - ALIGN_BITS);
       distance <<= ALIGN_BITS;
-      return _input.readBittreeReverse(dist_align, 0, distance, ALIGN_BITS);
+      return distance | _input.readBittreeReverse(dist_align, 0, ALIGN_BITS);
     }
   }
 }
