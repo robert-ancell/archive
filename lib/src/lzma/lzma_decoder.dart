@@ -6,17 +6,13 @@ class LzmaDecoder {
   // Compressed data.
   final _input = RangeDecoder();
 
-  // Uncompressed data.
-  late final List<int> _output; // FIXME: Uint8List
-  var _outputPosition = 0;
-
-  // Number of bits used from [_outputPosition] for probabilities.
+  // Number of bits used from [_dictionary] length for probabilities.
   final int _positionBits;
 
-  // Number of bits used from [_outputPosition] for literal probabilities.
+  // Number of bits used from [_dictionary] length for literal probabilities.
   final int _literalPositionBits;
 
-  // Number of bits used from [_output] for literal probabilities.
+  // Number of bits used from [_dictionary] for literal probabilities.
   final int _literalContextBits;
 
   // Bit probabilities for determining which LZMA packet is present.
@@ -48,10 +44,12 @@ class LzmaDecoder {
   // Decoder state, used in range decoding.
   var state = _LzmaState.Lit_Lit;
 
-  /// Creates an LZMA decoder reading from [input] which contains data of length [uncompressedLength] compressed with the LZMA algorithm.
+  // Decoded data, which is able to be copied.
+  final _dictionary = <int>[];
+
+  /// Creates an LZMA decoder reading from [input] which contains data compressed with the LZMA algorithm.
   LzmaDecoder(
       {required InputStreamBase input,
-      required int uncompressedLength,
       required int positionBits,
       required int literalPositionBits,
       required int literalContextBits})
@@ -59,8 +57,6 @@ class LzmaDecoder {
         _literalPositionBits = literalPositionBits,
         _literalContextBits = literalContextBits {
     _input.input = input;
-
-    _output = List<int>.filled(uncompressedLength, 0);
 
     _nonLiteralProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
@@ -94,7 +90,8 @@ class LzmaDecoder {
     reset();
   }
 
-  void reset() {
+  // Reset the decoder.
+  void reset({bool resetDictionary = false}) {
     state = _LzmaState.Lit_Lit;
     _distance0 = 0;
     _distance1 = 0;
@@ -120,13 +117,21 @@ class LzmaDecoder {
     _matchLengthDecoder.reset();
     _repeatLengthDecoder.reset();
     _distanceDecoder.reset();
+
+    if (resetDictionary) {
+      _dictionary.clear();
+    }
   }
 
-  List<int> decode() {
+  // Decode [uncompressedLength] bytes of LZMA data.
+  List<int> decode(int uncompressedLength) {
+    var initialSize = _dictionary.length;
+    var finalSize = initialSize + uncompressedLength;
+
     // Decode packets (literal, match or repeat) until all the data has been decoded.
-    while (_outputPosition < _output.length) {
+    while (_dictionary.length < finalSize) {
       var positionMask = (1 << _positionBits) - 1;
-      var posState = _outputPosition & positionMask;
+      var posState = _dictionary.length & positionMask;
       if (_input.readBit(_nonLiteralProbabilities[state.index], posState) ==
           0) {
         _decodeLiteral();
@@ -137,7 +142,8 @@ class LzmaDecoder {
       }
     }
 
-    return _output;
+    // Return new data added to the dictionary.
+    return _dictionary.sublist(initialSize);
   }
 
   // Returns true if the previous packet seen was a literal.
@@ -163,10 +169,10 @@ class LzmaDecoder {
   // Decode a packet containing a literal byte.
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
-    var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
+    var prevByte = _dictionary.length > 0 ? _dictionary.last : 0;
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
-    var high = (_outputPosition & positionMask) << _literalContextBits;
+    var high = (_dictionary.length & positionMask) << _literalContextBits;
     var probabilities = _literalProbabilities[low + high];
 
     int value;
@@ -174,7 +180,7 @@ class LzmaDecoder {
       value = _input.readBittree(probabilities[0], 8);
     } else {
       // Get the last byte before the match that just occurred.
-      prevByte = _output[_outputPosition - _distance0 - 1];
+      prevByte = _dictionary[_dictionary.length - _distance0 - 1];
 
       value = 0;
       var symbolPrefix = 1;
@@ -195,8 +201,7 @@ class LzmaDecoder {
     }
 
     // Add new byte to the output.
-    _output[_outputPosition] = value;
-    _outputPosition++;
+    _dictionary.add(value);
 
     // Update state.
     switch (state) {
@@ -286,10 +291,9 @@ class LzmaDecoder {
 
   // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
   void _repeatData(int distance, int length) {
-    var start = _outputPosition - distance - 1;
+    var start = _dictionary.length - distance - 1;
     for (var i = 0; i < length; i++) {
-      _output[_outputPosition] = _output[start + i];
-      _outputPosition++;
+      _dictionary.add(_dictionary[start + i]);
     }
   }
 }

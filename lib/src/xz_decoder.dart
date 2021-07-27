@@ -200,9 +200,8 @@ class XZDecoder {
             input: input.readBytes(compressedLength),
             literalContextBits: literalContextBits,
             literalPositionBits: literalPositionBits,
-            positionBits: positionBits,
-            uncompressedLength: uncompressedLength);
-        data.addAll(decoder.decode());
+            positionBits: positionBits);
+        data.addAll(decoder.decode(uncompressedLength));
       }
     }
   }
