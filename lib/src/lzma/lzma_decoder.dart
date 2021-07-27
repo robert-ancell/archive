@@ -38,7 +38,6 @@ class LzmaDecoder {
   final int _literalContextBits;
 
   // Probabilty trees
-  // FIXME: uint16
   late final List<List<int>> _matchProbabilities;
   late final List<int> _repeatProbabilities;
   late final List<int> _repeat0Probabilities;
@@ -106,18 +105,18 @@ class LzmaDecoder {
     distance2 = 0;
     distance3 = 0;
 
-    for (var i = 0; i < _LzmaState.values.length; i++) {
-      _input.resetProbabilityTree(_matchProbabilities[i]);
+    for (var tree in _matchProbabilities) {
+      _input.resetProbabilityTree(tree);
     }
     _input.resetProbabilityTree(_repeatProbabilities);
     _input.resetProbabilityTree(_repeat0Probabilities);
-    for (var i = 0; i < _LzmaState.values.length; i++) {
-      _input.resetProbabilityTree(_longRepeat0Probabilities[i]);
+    for (var tree in _longRepeat0Probabilities) {
+      _input.resetProbabilityTree(tree);
     }
     _input.resetProbabilityTree(_repeat1Probabilities);
     _input.resetProbabilityTree(_repeat2Probabilities);
-    for (var i = 0; i < _literalProbabilities.length; i++) {
-      _input.resetProbabilityTree(_literalProbabilities[i]);
+    for (var tree in _literalProbabilities) {
+      _input.resetProbabilityTree(tree);
     }
 
     _matchLengthDecoder.reset();
@@ -353,11 +352,11 @@ class LengthDecoder {
 
   void reset() {
     _input.resetProbabilityTree(lengthChoice);
-    for (var i = 0; i < low.length; i++) {
-      _input.resetProbabilityTree(low[i]);
+    for (var tree in low) {
+      _input.resetProbabilityTree(tree);
     }
-    for (var i = 0; i < mid.length; i++) {
-      _input.resetProbabilityTree(mid[i]);
+    for (var tree in mid) {
+      _input.resetProbabilityTree(tree);
     }
     _input.resetProbabilityTree(high);
   }
@@ -414,8 +413,8 @@ class DistanceDecoder {
   }
 
   void reset() {
-    for (var i = 0; i < dist_slot.length; i++) {
-      _input.resetProbabilityTree(dist_slot[i]);
+    for (var tree in dist_slot) {
+      _input.resetProbabilityTree(tree);
     }
     _input.resetProbabilityTree(dist_special);
     _input.resetProbabilityTree(dist_align);

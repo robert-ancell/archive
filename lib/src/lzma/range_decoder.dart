@@ -20,6 +20,7 @@ class RangeDecoder {
     }
   }
 
+  // FIXME: uint16
   List<int> makeProbabilityTree(int length) {
     return List<int>.filled(length, DEFAULT_PROB);
   }
