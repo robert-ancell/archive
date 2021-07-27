@@ -109,6 +109,8 @@ class LzmaDecoder {
   }
 
   void reset() {
+    print('RESET');
+
     state = LzmaState.Lit_Lit;
     rep0 = 0;
     rep1 = 0;
@@ -305,7 +307,7 @@ class LzmaDecoder {
       if (_input.readBit(is_rep0_long[state.index], posState) == 0) {
         literalState = LzmaState.Lit_ShortRep;
         length = 1;
-        distance = 0;
+        distance = rep0;
       } else {
         length = _repeatLengthDecoder.readLength(posState);
         distance = rep0;
@@ -365,7 +367,7 @@ class LzmaDecoder {
 
 class RangeDecoder {
   final InputStreamBase _input;
-  var range = 0xfffffffe;
+  var range = 0xffffffff;
   var code = 0;
 
   RangeDecoder(this._input) {
