@@ -15,15 +15,6 @@ enum LzmaState {
   NonLit_Rep
 }
 
-const int RC_SHIFT_BITS = 8;
-const int RC_TOP_BITS = 24;
-const int RC_TOP_VALUE = (1 << RC_TOP_BITS);
-const int RC_BIT_MODEL_TOTAL_BITS = 11;
-const int RC_BIT_MODEL_TOTAL = (1 << RC_BIT_MODEL_TOTAL_BITS);
-const int RC_MOVE_BITS = 5;
-
-const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
-
 /// FIXME: Kill
 const int LITERAL_CODER_SIZE = 0x300;
 
@@ -77,10 +68,22 @@ class LzmaDecoder {
 
     _positionMask = (1 << positionBits) - 1;
 
+    is_match = <List<int>>[];
+    for (var i = 0; i < LzmaState.values.length; i++) {
+      is_match.add(_input.makeProbabilityTree(16));
+    }
+    is_rep = _input.makeProbabilityTree(16);
+    is_rep0 = _input.makeProbabilityTree(16);
+    is_rep0_long = <List<int>>[];
+    for (var i = 0; i < LzmaState.values.length; i++) {
+      is_rep0_long.add(_input.makeProbabilityTree(16));
+    }
+    is_rep1 = _input.makeProbabilityTree(16);
+    is_rep2 = _input.makeProbabilityTree(16);
     literal = <List<int>>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralCodes; i++) {
-      literal.add(List<int>.filled(LITERAL_CODER_SIZE, DEFAULT_PROB));
+      literal.add(_input.makeProbabilityTree(LITERAL_CODER_SIZE));
     }
 
     _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
@@ -97,20 +100,18 @@ class LzmaDecoder {
     rep2 = 0;
     rep3 = 0;
 
-    is_match = <List<int>>[];
     for (var i = 0; i < LzmaState.values.length; i++) {
-      is_match.add(List<int>.filled(16, DEFAULT_PROB));
+      _input.resetProbabilityTree(is_match[i]);
     }
-    is_rep = List<int>.filled(16, DEFAULT_PROB);
-    is_rep0 = List<int>.filled(16, DEFAULT_PROB);
-    is_rep0_long = <List<int>>[];
+    _input.resetProbabilityTree(is_rep);
+    _input.resetProbabilityTree(is_rep0);
     for (var i = 0; i < LzmaState.values.length; i++) {
-      is_rep0_long.add(List<int>.filled(16, DEFAULT_PROB));
+      _input.resetProbabilityTree(is_rep0_long[i]);
     }
-    is_rep1 = List<int>.filled(16, DEFAULT_PROB);
-    is_rep2 = List<int>.filled(16, DEFAULT_PROB);
+    _input.resetProbabilityTree(is_rep1);
+    _input.resetProbabilityTree(is_rep2);
     for (var i = 0; i < literal.length; i++) {
-      literal[i].fillRange(0, literal[i].length, DEFAULT_PROB);
+      _input.resetProbabilityTree(literal[i]);
     }
 
     _matchLengthDecoder.reset();
@@ -313,6 +314,14 @@ class LzmaDecoder {
 }
 
 class RangeDecoder {
+  static const int RC_SHIFT_BITS = 8;
+  static const int RC_TOP_BITS = 24;
+  static const int RC_TOP_VALUE = (1 << RC_TOP_BITS);
+  static const int RC_BIT_MODEL_TOTAL_BITS = 11;
+  static const int RC_BIT_MODEL_TOTAL = (1 << RC_BIT_MODEL_TOTAL_BITS);
+  static const int RC_MOVE_BITS = 5;
+  static const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
+
   final InputStreamBase _input;
   var range = 0xffffffff;
   var code = 0;
@@ -322,6 +331,14 @@ class RangeDecoder {
     for (var i = 0; i < 5; i++) {
       code = (code << 8 | _input.readByte()) & 0xffffffff;
     }
+  }
+
+  List<int> makeProbabilityTree(int length) {
+    return List<int>.filled(length, DEFAULT_PROB);
+  }
+
+  void resetProbabilityTree(List<int> probabilities) {
+    probabilities.fillRange(0, probabilities.length, DEFAULT_PROB);
   }
 
   int readBit(List<int> probabilities, int index) {
@@ -409,27 +426,26 @@ class LengthDecoder {
   late final List<int> high;
 
   LengthDecoder(this._input, {required int positionBits}) {
-    lengthChoice = [DEFAULT_PROB, DEFAULT_PROB];
+    lengthChoice = _input.makeProbabilityTree(2);
     low = <List<int>>[];
     mid = <List<int>>[];
     for (var i = 0; i < 1 << positionBits; i++) {
-      low.add(List<int>.filled(LEN_LOW_SYMBOLS, DEFAULT_PROB));
-      mid.add(List<int>.filled(LEN_MID_SYMBOLS, DEFAULT_PROB));
+      low.add(_input.makeProbabilityTree(LEN_LOW_SYMBOLS));
+      mid.add(_input.makeProbabilityTree(LEN_MID_SYMBOLS));
     }
-    high = List<int>.filled(LEN_HIGH_SYMBOLS, DEFAULT_PROB);
+    high = _input.makeProbabilityTree(LEN_HIGH_SYMBOLS);
     reset();
   }
 
   void reset() {
-    lengthChoice[0] = DEFAULT_PROB;
-    lengthChoice[1] = DEFAULT_PROB;
+    _input.resetProbabilityTree(lengthChoice);
     for (var i = 0; i < low.length; i++) {
-      low[i].fillRange(0, low[i].length, DEFAULT_PROB);
+      _input.resetProbabilityTree(low[i]);
     }
     for (var i = 0; i < mid.length; i++) {
-      mid[i].fillRange(0, mid[i].length, DEFAULT_PROB);
+      _input.resetProbabilityTree(mid[i]);
     }
-    high.fillRange(0, high.length, DEFAULT_PROB);
+    _input.resetProbabilityTree(high);
   }
 
   int readLength(int posState) {
@@ -477,19 +493,18 @@ class DistanceDecoder {
   DistanceDecoder(this._input) {
     dist_slot = <List<int>>[];
     for (var i = 0; i < DIST_STATES; i++) {
-      dist_slot.add(List<int>.filled(DIST_SLOTS, DEFAULT_PROB));
+      dist_slot.add(_input.makeProbabilityTree(DIST_SLOTS));
     }
-    dist_special =
-        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, DEFAULT_PROB);
-    dist_align = List<int>.filled(ALIGN_SIZE, DEFAULT_PROB);
+    dist_special = _input.makeProbabilityTree(FULL_DISTANCES - DIST_MODEL_END);
+    dist_align = _input.makeProbabilityTree(ALIGN_SIZE);
   }
 
   void reset() {
     for (var i = 0; i < dist_slot.length; i++) {
-      dist_slot[i].fillRange(0, dist_slot[i].length, DEFAULT_PROB);
+      _input.resetProbabilityTree(dist_slot[i]);
     }
-    dist_special.fillRange(0, dist_special.length, DEFAULT_PROB);
-    dist_align.fillRange(0, dist_align.length, DEFAULT_PROB);
+    _input.resetProbabilityTree(dist_special);
+    _input.resetProbabilityTree(dist_align);
   }
 
   int readDistance(int length) {
