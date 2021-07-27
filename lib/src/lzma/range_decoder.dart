@@ -63,12 +63,11 @@ class RangeDecoder {
     return symbol;
   }
 
-  int readBittreeReverse(
-      RangeDecoderProbabilities probabilities, int offset, int count) {
+  int readBittreeReverse(RangeDecoderProbabilities probabilities, int count) {
     var symbol = 1;
     var value = 0;
     for (var i = 0; i < count; i++) {
-      var b = readBit(probabilities, offset + symbol);
+      var b = readBit(probabilities, symbol);
       symbol = (symbol << 1) | b;
       value |= b << i;
     }

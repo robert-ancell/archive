@@ -355,11 +355,11 @@ class _LengthDecoder {
 
 // Decodes match distance fields from LZMA data.
 class _DistanceDecoder {
-  static const int DIST_SLOT_BITS = 6;
+  // Number of bits in a slot.
+  final int _slotBitCount = 6;
 
-  static const int DIST_MODEL_END = 14;
-
-  static const int ALIGN_BITS = 4;
+  // Number of aligned bits.
+  final int _alignBitCount = 4;
 
   // Data being read from.
   final RangeDecoder _input;
@@ -367,22 +367,25 @@ class _DistanceDecoder {
   // Bit probabilities for the 6 bit slot.
   late final List<RangeDecoderProbabilities> _slotProbabilities;
 
-  late final RangeDecoderProbabilities _specialProbabilities;
+  // Bit probabilities for slots 4-13.
+  late final List<RangeDecoderProbabilities> _shortProbabilities;
 
-  late final RangeDecoderProbabilities _alignProbabilities;
+  // Bit probabilities for slots 14-63.
+  late final RangeDecoderProbabilities _longProbabilities;
 
   _DistanceDecoder(this._input) {
     _slotProbabilities = <RangeDecoderProbabilities>[];
-    var slotSize = 1 << DIST_SLOT_BITS;
+    var slotSize = 1 << _slotBitCount;
     for (var i = 0; i < 4; i++) {
       _slotProbabilities.add(RangeDecoderProbabilities(slotSize));
     }
-    var fullDistancesBits = (DIST_MODEL_END ~/ 2);
-    var fullDistances = (1 << fullDistancesBits);
-    _specialProbabilities =
-        RangeDecoderProbabilities(fullDistances - DIST_MODEL_END);
-    var alignSize = 1 << ALIGN_BITS;
-    _alignProbabilities = RangeDecoderProbabilities(alignSize);
+    _shortProbabilities = <RangeDecoderProbabilities>[];
+    for (var slot = 4; slot < 14; slot++) {
+      var bitCount = (slot ~/ 2) - 1;
+      _shortProbabilities.add(RangeDecoderProbabilities(1 << bitCount));
+    }
+    var alignSize = 1 << _alignBitCount;
+    _longProbabilities = RangeDecoderProbabilities(alignSize);
   }
 
   // Reset this decoder.
@@ -390,8 +393,10 @@ class _DistanceDecoder {
     for (var tree in _slotProbabilities) {
       tree.reset();
     }
-    _specialProbabilities.reset();
-    _alignProbabilities.reset();
+    for (var tree in _shortProbabilities) {
+      tree.reset();
+    }
+    _longProbabilities.reset();
   }
 
   // Reads a distance field.
@@ -403,24 +408,29 @@ class _DistanceDecoder {
     }
     var probabilities = _slotProbabilities[distState];
 
-    var slot = _input.readBittree(probabilities, DIST_SLOT_BITS);
+    // Distances are encoded starting with a six bit slot.
+    var slot = _input.readBittree(probabilities, _slotBitCount);
+
+    // Slots 0-3 map to the distances 0-3.
     if (slot < 4) {
       return slot;
     }
 
-    var bitCount = (slot >> 1) - 1;
+    // Larger slots have a variable number of bits that follow.
     var prefix = 0x2 | (slot & 0x1);
+    var bitCount = (slot ~/ 2) - 1;
 
-    if (slot < DIST_MODEL_END) {
+    // Short distances are stored in reverse bittree format.
+    if (slot < 14) {
       return prefix << bitCount |
-          _input.readBittreeReverse(
-              _specialProbabilities, (prefix << bitCount) - slot - 1, bitCount);
-    } else {
-      var directCount = bitCount - ALIGN_BITS;
-      var directBits = _input.readDirect(directCount);
-      var alignBits =
-          _input.readBittreeReverse(_alignProbabilities, 0, ALIGN_BITS);
-      return prefix << bitCount | directBits << ALIGN_BITS | alignBits;
+          _input.readBittreeReverse(_shortProbabilities[slot - 4], bitCount);
     }
+
+    // Large distances are a combination of direct bits and reverse bittree format.
+    var directCount = bitCount - _alignBitCount;
+    var directBits = _input.readDirect(directCount);
+    var alignBits =
+        _input.readBittreeReverse(_longProbabilities, _alignBitCount);
+    return prefix << bitCount | directBits << _alignBitCount | alignBits;
   }
 }
