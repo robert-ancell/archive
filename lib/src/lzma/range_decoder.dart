@@ -12,7 +12,7 @@ const int _probabilityHalf = _probabilityOne ~/ 2;
 // Probability table used with [RangeDecoder].
 class RangeDecoderTable {
   // Table of probabilities for each symbol.
-  final List<int> table;
+  final List<int> table; // FIXME 16
 
   RangeDecoderTable(int length)
       : table = List<int>.filled(length, _probabilityHalf);

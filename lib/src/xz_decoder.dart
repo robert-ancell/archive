@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'util/archive_exception.dart';
 import 'util/crc32.dart';
 import 'util/input_stream.dart';
@@ -19,7 +21,7 @@ class XZDecoder {
 /// Decodes an XZ stream.
 class _XZStreamDecoder {
   // Decoded data.
-  final data = <int>[];
+  final data = BytesBuilder();
 
   // LZMA decoder.
   final decoder = LzmaDecoder();
@@ -40,14 +42,12 @@ class _XZStreamDecoder {
       if (blockHeader == 0) {
         var indexSize = _readStreamIndex(input);
         _readStreamFooter(input, indexSize);
-        return data;
+        return data.takeBytes();
       }
 
       var blockLength = (blockHeader + 1) * 4;
       _readBlock(input, blockLength);
     }
-
-    return data;
   }
 
   // Reads an XZ steam header from [input].
@@ -203,7 +203,7 @@ class _XZStreamDecoder {
           return;
         } else if (control == 1) {
           var length = input.readByte() << 8 | input.readByte() + 1;
-          data.addAll(input.readBytes(length).toUint8List());
+          data.add(input.readBytes(length).toUint8List());
         } else {
           throw ArchiveException('Unknown LZMA2 control code $control');
         }
@@ -237,7 +237,7 @@ class _XZStreamDecoder {
               resetDictionary: reset == 3);
         }
 
-        data.addAll(decoder.decode(
+        data.add(decoder.decode(
             input.readBytes(compressedLength), uncompressedLength));
       }
     }
