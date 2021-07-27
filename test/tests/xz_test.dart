@@ -34,5 +34,16 @@ void main() {
       var data = XZDecoder().decodeBytes(compressed);
       expect(data, equals(utf8.encode('hello hello hello')));
     });
+
+    test('decode cat.jpg', () {
+      var file = File(p.join(testDirPath, 'res/xz/cat.jpg.xz'));
+      final compressed = file.readAsBytesSync();
+
+      var b = File(p.join(testDirPath, 'res/cat.jpg'));
+      final b_bytes = b.readAsBytesSync();
+
+      var data = XZDecoder().decodeBytes(compressed);
+      compare_bytes(data, b_bytes);
+    });
   });
 }
