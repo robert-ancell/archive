@@ -2,7 +2,7 @@ import '../util/input_stream.dart';
 
 import 'range_decoder.dart';
 
-enum LzmaState {
+enum _LzmaState {
   Lit_Lit,
   Match_Lit_Lit,
   Rep_Lit_Lit,
@@ -28,18 +28,23 @@ class LzmaDecoder {
   late final List<int> _output; // FIXME: Uint8List
   var _outputPosition = 0;
 
+  // Number of bits used from [_outputPosition] for probabilities.
   final int _positionBits;
+
+  // Number of bits used from [_outputPosition] for literal probabilities.
   final int _literalPositionBits;
+
+  // Number of bits used from [_output] for literal probabilities.
   final int _literalContextBits;
 
   // Probabilty trees
   // FIXME: uint16
   late final List<List<int>> is_match;
-  late final List<int> is_rep;
-  late final List<int> is_rep0;
-  late final List<List<int>> is_rep0_long;
-  late final List<int> is_rep1;
-  late final List<int> is_rep2;
+  late final List<int> _repeatProbabilities;
+  late final List<int> _repeat0Probabilities;
+  late final List<List<int>> _longRepeat0Probabilities;
+  late final List<int> _repeat1Probabilities;
+  late final List<int> _repeat2Probabilities;
 
   late final List<List<int>> _literalProbabilities;
 
@@ -48,12 +53,12 @@ class LzmaDecoder {
   late final DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
-  var rep0 = 0;
-  var rep1 = 0;
-  var rep2 = 0;
-  var rep3 = 0;
+  var distance0 = 0;
+  var distance1 = 0;
+  var distance2 = 0;
+  var distance3 = 0;
 
-  var state = LzmaState.Lit_Lit;
+  var state = _LzmaState.Lit_Lit;
 
   /// Creates an LZMA decoder reading from [input] which contains data of length [uncompressedLength] compressed with the LZMA algorithm.
   LzmaDecoder(
@@ -70,17 +75,17 @@ class LzmaDecoder {
     _output = List<int>.filled(uncompressedLength, 0);
 
     is_match = <List<int>>[];
-    for (var i = 0; i < LzmaState.values.length; i++) {
+    for (var i = 0; i < _LzmaState.values.length; i++) {
       is_match.add(_input.makeProbabilityTree(16));
     }
-    is_rep = _input.makeProbabilityTree(16);
-    is_rep0 = _input.makeProbabilityTree(16);
-    is_rep0_long = <List<int>>[];
-    for (var i = 0; i < LzmaState.values.length; i++) {
-      is_rep0_long.add(_input.makeProbabilityTree(16));
+    _repeatProbabilities = _input.makeProbabilityTree(16);
+    _repeat0Probabilities = _input.makeProbabilityTree(16);
+    _longRepeat0Probabilities = <List<int>>[];
+    for (var i = 0; i < _LzmaState.values.length; i++) {
+      _longRepeat0Probabilities.add(_input.makeProbabilityTree(16));
     }
-    is_rep1 = _input.makeProbabilityTree(16);
-    is_rep2 = _input.makeProbabilityTree(16);
+    _repeat1Probabilities = _input.makeProbabilityTree(16);
+    _repeat2Probabilities = _input.makeProbabilityTree(16);
     _literalProbabilities = <List<int>>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralCodes; i++) {
@@ -95,22 +100,22 @@ class LzmaDecoder {
   }
 
   void reset() {
-    state = LzmaState.Lit_Lit;
-    rep0 = 0;
-    rep1 = 0;
-    rep2 = 0;
-    rep3 = 0;
+    state = _LzmaState.Lit_Lit;
+    distance0 = 0;
+    distance1 = 0;
+    distance2 = 0;
+    distance3 = 0;
 
-    for (var i = 0; i < LzmaState.values.length; i++) {
+    for (var i = 0; i < _LzmaState.values.length; i++) {
       _input.resetProbabilityTree(is_match[i]);
     }
-    _input.resetProbabilityTree(is_rep);
-    _input.resetProbabilityTree(is_rep0);
-    for (var i = 0; i < LzmaState.values.length; i++) {
-      _input.resetProbabilityTree(is_rep0_long[i]);
+    _input.resetProbabilityTree(_repeatProbabilities);
+    _input.resetProbabilityTree(_repeat0Probabilities);
+    for (var i = 0; i < _LzmaState.values.length; i++) {
+      _input.resetProbabilityTree(_longRepeat0Probabilities[i]);
     }
-    _input.resetProbabilityTree(is_rep1);
-    _input.resetProbabilityTree(is_rep2);
+    _input.resetProbabilityTree(_repeat1Probabilities);
+    _input.resetProbabilityTree(_repeat2Probabilities);
     for (var i = 0; i < _literalProbabilities.length; i++) {
       _input.resetProbabilityTree(_literalProbabilities[i]);
     }
@@ -126,7 +131,7 @@ class LzmaDecoder {
       var posState = _outputPosition & positionMask;
       if (_input.readBit(is_match[state.index], posState) == 0) {
         _decodeLiteral();
-      } else if (_input.readBit(is_rep, state.index) == 0) {
+      } else if (_input.readBit(_repeatProbabilities, state.index) == 0) {
         _decodeMatch(posState);
       } else {
         _decodeRepeat(posState);
@@ -146,22 +151,22 @@ class LzmaDecoder {
 
     int symbol;
     switch (state) {
-      case LzmaState.Lit_Lit:
-      case LzmaState.Match_Lit_Lit:
-      case LzmaState.Rep_Lit_Lit:
-      case LzmaState.ShortRep_Lit_Lit:
-      case LzmaState.Match_Lit:
-      case LzmaState.Rep_Lit:
-      case LzmaState.ShortRep_Lit:
+      case _LzmaState.Lit_Lit:
+      case _LzmaState.Match_Lit_Lit:
+      case _LzmaState.Rep_Lit_Lit:
+      case _LzmaState.ShortRep_Lit_Lit:
+      case _LzmaState.Match_Lit:
+      case _LzmaState.Rep_Lit:
+      case _LzmaState.ShortRep_Lit:
         symbol = _input.readBittree(probabilities, 0x100) & 0xff;
         break;
-      case LzmaState.Lit_Match:
-      case LzmaState.Lit_LongRep:
-      case LzmaState.Lit_ShortRep:
-      case LzmaState.NonLit_Match:
-      case LzmaState.NonLit_Rep:
+      case _LzmaState.Lit_Match:
+      case _LzmaState.Lit_LongRep:
+      case _LzmaState.Lit_ShortRep:
+      case _LzmaState.NonLit_Match:
+      case _LzmaState.NonLit_Rep:
         // Get the last byte before this match.
-        var matchByte = _output[_outputPosition - rep0 - 1] << 1;
+        var matchByte = _output[_outputPosition - distance0 - 1] << 1;
 
         symbol = 1;
         var offset = 0x100;
@@ -190,31 +195,31 @@ class LzmaDecoder {
     _outputPosition++;
 
     switch (state) {
-      case LzmaState.Lit_Lit:
-      case LzmaState.Match_Lit_Lit:
-      case LzmaState.Rep_Lit_Lit:
-      case LzmaState.ShortRep_Lit_Lit:
-        state = LzmaState.Lit_Lit;
+      case _LzmaState.Lit_Lit:
+      case _LzmaState.Match_Lit_Lit:
+      case _LzmaState.Rep_Lit_Lit:
+      case _LzmaState.ShortRep_Lit_Lit:
+        state = _LzmaState.Lit_Lit;
         break;
-      case LzmaState.Match_Lit:
-        state = LzmaState.Match_Lit_Lit;
+      case _LzmaState.Match_Lit:
+        state = _LzmaState.Match_Lit_Lit;
         break;
-      case LzmaState.Rep_Lit:
-        state = LzmaState.Rep_Lit_Lit;
+      case _LzmaState.Rep_Lit:
+        state = _LzmaState.Rep_Lit_Lit;
         break;
-      case LzmaState.ShortRep_Lit:
-        state = LzmaState.ShortRep_Lit_Lit;
+      case _LzmaState.ShortRep_Lit:
+        state = _LzmaState.ShortRep_Lit_Lit;
         break;
-      case LzmaState.Lit_Match:
-      case LzmaState.NonLit_Match:
-        state = LzmaState.Match_Lit;
+      case _LzmaState.Lit_Match:
+      case _LzmaState.NonLit_Match:
+        state = _LzmaState.Match_Lit;
         break;
-      case LzmaState.Lit_LongRep:
-      case LzmaState.NonLit_Rep:
-        state = LzmaState.Rep_Lit;
+      case _LzmaState.Lit_LongRep:
+      case _LzmaState.NonLit_Rep:
+        state = _LzmaState.Rep_Lit;
         break;
-      case LzmaState.Lit_ShortRep:
-        state = LzmaState.ShortRep_Lit;
+      case _LzmaState.Lit_ShortRep:
+        state = _LzmaState.ShortRep_Lit;
         break;
     }
   }
@@ -225,27 +230,27 @@ class LzmaDecoder {
 
     _repeatData(distance, length);
 
-    rep3 = rep2;
-    rep2 = rep1;
-    rep1 = rep0;
-    rep0 = distance;
+    distance3 = distance2;
+    distance2 = distance1;
+    distance1 = distance0;
+    distance0 = distance;
 
     switch (state) {
-      case LzmaState.Lit_Lit:
-      case LzmaState.Match_Lit_Lit:
-      case LzmaState.Rep_Lit_Lit:
-      case LzmaState.ShortRep_Lit_Lit:
-      case LzmaState.Match_Lit:
-      case LzmaState.Rep_Lit:
-      case LzmaState.ShortRep_Lit:
-        state = LzmaState.Lit_Match;
+      case _LzmaState.Lit_Lit:
+      case _LzmaState.Match_Lit_Lit:
+      case _LzmaState.Rep_Lit_Lit:
+      case _LzmaState.ShortRep_Lit_Lit:
+      case _LzmaState.Match_Lit:
+      case _LzmaState.Rep_Lit:
+      case _LzmaState.ShortRep_Lit:
+        state = _LzmaState.Lit_Match;
         break;
-      case LzmaState.Lit_Match:
-      case LzmaState.Lit_LongRep:
-      case LzmaState.Lit_ShortRep:
-      case LzmaState.NonLit_Match:
-      case LzmaState.NonLit_Rep:
-        state = LzmaState.NonLit_Match;
+      case _LzmaState.Lit_Match:
+      case _LzmaState.Lit_LongRep:
+      case _LzmaState.Lit_ShortRep:
+      case _LzmaState.NonLit_Match:
+      case _LzmaState.NonLit_Rep:
+        state = _LzmaState.NonLit_Match;
         break;
     }
   }
@@ -253,54 +258,55 @@ class LzmaDecoder {
   void _decodeRepeat(int posState) {
     int length;
     int distance;
-    var literalState = LzmaState.Lit_LongRep;
-    if (_input.readBit(is_rep0, state.index) == 0) {
-      if (_input.readBit(is_rep0_long[state.index], posState) == 0) {
-        literalState = LzmaState.Lit_ShortRep;
+    var literalState = _LzmaState.Lit_LongRep;
+    if (_input.readBit(_repeat0Probabilities, state.index) == 0) {
+      if (_input.readBit(_longRepeat0Probabilities[state.index], posState) ==
+          0) {
+        literalState = _LzmaState.Lit_ShortRep;
         length = 1;
-        distance = rep0;
+        distance = distance0;
       } else {
         length = _repeatLengthDecoder.readLength(posState);
-        distance = rep0;
+        distance = distance0;
       }
-    } else if (_input.readBit(is_rep1, state.index) == 0) {
+    } else if (_input.readBit(_repeat1Probabilities, state.index) == 0) {
       length = _repeatLengthDecoder.readLength(posState);
-      distance = rep1;
-      rep1 = rep0;
-      rep0 = distance;
-    } else if (_input.readBit(is_rep2, state.index) == 0) {
+      distance = distance1;
+      distance1 = distance0;
+      distance0 = distance;
+    } else if (_input.readBit(_repeat2Probabilities, state.index) == 0) {
       length = _repeatLengthDecoder.readLength(posState);
-      distance = rep2;
-      rep2 = rep1;
-      rep1 = rep0;
-      rep0 = distance;
+      distance = distance2;
+      distance2 = distance1;
+      distance1 = distance0;
+      distance0 = distance;
     } else {
       length = _repeatLengthDecoder.readLength(posState);
-      distance = rep3;
-      rep3 = rep2;
-      rep2 = rep1;
-      rep1 = rep0;
-      rep0 = distance;
+      distance = distance3;
+      distance3 = distance2;
+      distance2 = distance1;
+      distance1 = distance0;
+      distance0 = distance;
     }
 
     _repeatData(distance, length);
 
     switch (state) {
-      case LzmaState.Lit_Lit:
-      case LzmaState.Match_Lit_Lit:
-      case LzmaState.Rep_Lit_Lit:
-      case LzmaState.ShortRep_Lit_Lit:
-      case LzmaState.Match_Lit:
-      case LzmaState.Rep_Lit:
-      case LzmaState.ShortRep_Lit:
+      case _LzmaState.Lit_Lit:
+      case _LzmaState.Match_Lit_Lit:
+      case _LzmaState.Rep_Lit_Lit:
+      case _LzmaState.ShortRep_Lit_Lit:
+      case _LzmaState.Match_Lit:
+      case _LzmaState.Rep_Lit:
+      case _LzmaState.ShortRep_Lit:
         state = literalState;
         break;
-      case LzmaState.Lit_Match:
-      case LzmaState.Lit_LongRep:
-      case LzmaState.Lit_ShortRep:
-      case LzmaState.NonLit_Match:
-      case LzmaState.NonLit_Rep:
-        state = LzmaState.NonLit_Rep;
+      case _LzmaState.Lit_Match:
+      case _LzmaState.Lit_LongRep:
+      case _LzmaState.Lit_ShortRep:
+      case _LzmaState.NonLit_Match:
+      case _LzmaState.NonLit_Rep:
+        state = _LzmaState.NonLit_Rep;
         break;
     }
   }
