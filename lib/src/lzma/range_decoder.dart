@@ -76,7 +76,8 @@ class RangeDecoder {
     return value;
   }
 
-  int readDirect(int value, int limit) {
+  int readDirect(int limit) {
+    var value = 0;
     while (true) {
       _normalize();
       range >>= 1;

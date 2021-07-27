@@ -413,7 +413,8 @@ class _DistanceDecoder {
       return distance |
           _input.readBittreeReverse(dist_special, distance - slot - 1, limit);
     } else {
-      distance = _input.readDirect(distance, limit - ALIGN_BITS);
+      distance <<= limit - ALIGN_BITS;
+      distance |= _input.readDirect(limit - ALIGN_BITS);
       distance <<= ALIGN_BITS;
       return distance | _input.readBittreeReverse(dist_align, 0, ALIGN_BITS);
     }
