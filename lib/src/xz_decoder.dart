@@ -27,27 +27,24 @@ class _XZStreamDecoder {
   // Stream flags, which are sent in both the header and the footer.
   var streamFlags = 0;
 
+  // Block sizes.
+  var _blockSizes = <_XZBlockSize>[];
+
   // Decode this stream and return the uncompressed data.
   List<int> decode(InputStreamBase input) {
     _readStreamHeader(input);
 
-    var blocks = <_XZBlock>[];
     while (true) {
       var blockHeader = input.peekBytes(1).readByte();
 
       if (blockHeader == 0) {
-        var indexSize = _readStreamIndex(input, blocks);
+        var indexSize = _readStreamIndex(input);
         _readStreamFooter(input, indexSize);
-        var data = <int>[];
-        for (var block in blocks) {
-          data.addAll(block.data);
-        }
         return data;
       }
 
       var blockLength = (blockHeader + 1) * 4;
-      var block = _readBlock(input, blockLength);
-      blocks.add(block);
+      _readBlock(input, blockLength);
     }
 
     return data;
@@ -80,7 +77,8 @@ class _XZStreamDecoder {
   }
 
   // Reads a data block from [input].
-  _XZBlock _readBlock(InputStreamBase input, int headerLength) {
+  void _readBlock(InputStreamBase input, int headerLength) {
+    var blockStart = input.position;
     var header = input.readBytes(headerLength - 4);
 
     header.skip(1); // Skip length field
@@ -130,11 +128,21 @@ class _XZStreamDecoder {
       throw ArchiveException('Unsupported filters');
     }
 
-    var data = _readLZMA2(input, dictionarySize);
-    if (uncompressedLength != null && data.length != uncompressedLength) {
+    var startPosition = input.position;
+    var startDataLength = data.length;
+    _readLZMA2(input, dictionarySize);
+    var actualCompressedLength = input.position - startPosition;
+    var actualUncompressedLength = data.length - startDataLength;
+    if (compressedLength != null &&
+        compressedLength != actualCompressedLength) {
+      throw ArchiveException("Compressed data doesn't match expected length");
+    }
+    uncompressedLength ??= actualUncompressedLength;
+    if (uncompressedLength != actualUncompressedLength) {
       throw ArchiveException("Uncompressed data doesn't match expected length");
     }
-    _readPadding(input);
+
+    var paddingSize = _readPadding(input);
 
     // Checksum
     var checkType = streamFlags & 0xf;
@@ -176,24 +184,23 @@ class _XZStreamDecoder {
         throw ArchiveException('Unknown block check type $checkType');
     }
 
-    return _XZBlock(data, compressedLength);
+    var unpaddedLength = input.position - blockStart - paddingSize;
+    _blockSizes.add(_XZBlockSize(unpaddedLength, uncompressedLength));
   }
 
   // Reads LZMA2 data from [input].
-  // Returns the decompressed data.
-  List<int> _readLZMA2(InputStreamBase input, int dictionarySize) {
-    var data = <int>[];
+  void _readLZMA2(InputStreamBase input, int dictionarySize) {
     while (true) {
       var control = input.readByte();
       // Control values:
       // 00000000 - end marker
       // 00000001 - reset dictionary and uncompresed data
       // 00000010 - uncompressed data
-      // 1rrxxxxx - LZMA data with reset (r) and bits 16-20 of size (x)
+      // 1rrxxxxx - LZMA data with reset (r) and high bits of size field (x)
       if (control & 0x80 == 0) {
         if (control == 0) {
           decoder.reset(resetDictionary: true);
-          return data;
+          return;
         } else if (control == 1) {
           var length = input.readByte() << 8 | input.readByte() + 1;
           data.addAll(input.readBytes(length).toUint8List());
@@ -236,24 +243,23 @@ class _XZStreamDecoder {
     }
   }
 
-  // Reads an XZ stream index from [input] and validates it against [blocks].
+  // Reads an XZ stream index from [input].
   // Returns the length of the index in bytes.
-  int _readStreamIndex(InputStreamBase input, List<_XZBlock> blocks) {
+  int _readStreamIndex(InputStreamBase input) {
     var startPosition = input.position;
     input.skip(1); // Skip index indicator
     var nRecords = _readMultibyteInteger(input);
-    if (nRecords != blocks.length) {
+    if (nRecords != _blockSizes.length) {
       throw ArchiveException('Stream index block count mismatch');
     }
 
     for (var i = 0; i < nRecords; i++) {
-      var compressedLength = _readMultibyteInteger(input);
+      var unpaddedLength = _readMultibyteInteger(input);
       var uncompressedLength = _readMultibyteInteger(input);
-      if (blocks[i].compressedLength != null &&
-          blocks[i].compressedLength != compressedLength) {
+      if (_blockSizes[i].unpaddedLength != unpaddedLength) {
         throw ArchiveException('Stream index compressed length mismatch');
       }
-      if (blocks[i].data.length != uncompressedLength) {
+      if (_blockSizes[i].uncompressedLength != uncompressedLength) {
         throw ArchiveException('Stream index uncompressed length mismatch');
       }
     }
@@ -315,18 +321,26 @@ class _XZStreamDecoder {
 
   // Reads padding from [input] until the read position is aligned to a 4 byte boundary.
   // The padding bytes are confirmed to be zeros.
-  void _readPadding(InputStreamBase input) {
+  // Returns he number of padding bytes.
+  int _readPadding(InputStreamBase input) {
+    var count = 0;
     while (input.position % 4 != 0) {
       if (input.readByte() != 0) {
         throw ArchiveException('Non-zero padding byte');
       }
+      count++;
     }
+    return count;
   }
 }
 
-class _XZBlock {
-  final List<int> data;
-  final int? compressedLength;
+// Information about a block size.
+class _XZBlockSize {
+  // The block size excluding padding.
+  final int unpaddedLength;
 
-  const _XZBlock(this.data, this.compressedLength);
+  // The size of the data in the block when uncompressed.
+  final int uncompressedLength;
+
+  const _XZBlockSize(this.unpaddedLength, this.uncompressedLength);
 }
