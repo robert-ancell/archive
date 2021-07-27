@@ -198,6 +198,7 @@ class LzmaDecoder {
     _output[_outputPosition] = value;
     _outputPosition++;
 
+    // Update state.
     switch (state) {
       case _LzmaState.Lit_Lit:
       case _LzmaState.Match_Lit_Lit:
@@ -246,32 +247,28 @@ class LzmaDecoder {
 
   // Decode a packet that repeats a match already done.
   void _decodeRepeat(int posState) {
-    int length;
     int distance;
-    var literalState = _LzmaState.Lit_LongRep;
     if (_input.readBit(_repeat0Probabilities, state.index) == 0) {
       if (_input.readBit(_longRepeat0Probabilities[state.index], posState) ==
           0) {
-        literalState = _LzmaState.Lit_ShortRep;
-        length = 1;
-        distance = distance0;
+        _repeatData(distance0, 1);
+        state = _prevPacketIsLiteral()
+            ? _LzmaState.Lit_ShortRep
+            : _LzmaState.NonLit_Rep;
+        return;
       } else {
-        length = _repeatLengthDecoder.readLength(posState);
         distance = distance0;
       }
     } else if (_input.readBit(_repeat1Probabilities, state.index) == 0) {
-      length = _repeatLengthDecoder.readLength(posState);
       distance = distance1;
       distance1 = distance0;
       distance0 = distance;
     } else if (_input.readBit(_repeat2Probabilities, state.index) == 0) {
-      length = _repeatLengthDecoder.readLength(posState);
       distance = distance2;
       distance2 = distance1;
       distance1 = distance0;
       distance0 = distance;
     } else {
-      length = _repeatLengthDecoder.readLength(posState);
       distance = distance3;
       distance3 = distance2;
       distance2 = distance1;
@@ -279,9 +276,12 @@ class LzmaDecoder {
       distance0 = distance;
     }
 
+    var length = _repeatLengthDecoder.readLength(posState);
     _repeatData(distance, length);
 
-    state = _prevPacketIsLiteral() ? literalState : _LzmaState.NonLit_Rep;
+    // Update state.
+    state =
+        _prevPacketIsLiteral() ? _LzmaState.Lit_LongRep : _LzmaState.NonLit_Rep;
   }
 
   // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
