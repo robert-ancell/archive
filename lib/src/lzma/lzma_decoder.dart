@@ -49,7 +49,7 @@ class LzmaDecoder {
 
   late final _LengthDecoder _matchLengthDecoder;
   late final _LengthDecoder _repeatLengthDecoder;
-  late final DistanceDecoder _distanceDecoder;
+  late final _DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
   var distance0 = 0;
@@ -93,9 +93,10 @@ class LzmaDecoder {
       _literalProbabilities.add(RangeDecoderProbabilities(LITERAL_CODER_SIZE));
     }
 
-    _matchLengthDecoder = _LengthDecoder(_input, positionBits: positionBits);
-    _repeatLengthDecoder = _LengthDecoder(_input, positionBits: positionBits);
-    _distanceDecoder = DistanceDecoder(_input);
+    var positionCount = 1 << positionBits;
+    _matchLengthDecoder = _LengthDecoder(_input, positionCount);
+    _repeatLengthDecoder = _LengthDecoder(_input, positionCount);
+    _distanceDecoder = _DistanceDecoder(_input);
 
     reset();
   }
@@ -297,13 +298,13 @@ class LzmaDecoder {
 
 const int MATCH_LEN_MIN = 2;
 
-// Decodes length fields from LZMA data.
+// Decodes match/repeat length fields from LZMA data.
 class _LengthDecoder {
   // Data being read from.
   final RangeDecoder _input;
 
   // Probabilities
-  late final RangeDecoderProbabilities lengthChoice;
+  late final RangeDecoderProbabilities formProbabilities;
 
   // Bit probabilities when lengths are in the short form (2-9).
   late final List<RangeDecoderProbabilities> shortProbabilities;
@@ -314,11 +315,11 @@ class _LengthDecoder {
   // Bit probabilities when lengths are in the long form (18-273).
   late final RangeDecoderProbabilities longProbabilities;
 
-  _LengthDecoder(this._input, {required int positionBits}) {
-    lengthChoice = RangeDecoderProbabilities(2);
+  _LengthDecoder(this._input, int positionCount) {
+    formProbabilities = RangeDecoderProbabilities(2);
     shortProbabilities = <RangeDecoderProbabilities>[];
     mediumProbabilities = <RangeDecoderProbabilities>[];
-    for (var i = 0; i < 1 << positionBits; i++) {
+    for (var i = 0; i < positionCount; i++) {
       shortProbabilities.add(RangeDecoderProbabilities(8));
       mediumProbabilities.add(RangeDecoderProbabilities(8));
     }
@@ -329,7 +330,7 @@ class _LengthDecoder {
 
   // Reset this decoder.
   void reset() {
-    lengthChoice.reset();
+    formProbabilities.reset();
     for (var tree in shortProbabilities) {
       tree.reset();
     }
@@ -341,10 +342,10 @@ class _LengthDecoder {
 
   // Read a length field from the range decoder.
   int readLength(int posState) {
-    if (_input.readBit(lengthChoice, 0) == 0) {
+    if (_input.readBit(formProbabilities, 0) == 0) {
       // 0xxx - Length 2 - 9
       return 2 + _input.readBittree(shortProbabilities[posState], 3);
-    } else if (_input.readBit(lengthChoice, 1) == 0) {
+    } else if (_input.readBit(formProbabilities, 1) == 0) {
       // 10xxx - Length 10 - 17
       return 10 + _input.readBittree(mediumProbabilities[posState], 3);
     } else {
@@ -354,7 +355,8 @@ class _LengthDecoder {
   }
 }
 
-class DistanceDecoder {
+// Decodes match distance fields from LZMA data.
+class _DistanceDecoder {
 // FIXME: Kill
   static const int DIST_STATES = 4;
   static const int DIST_SLOT_BITS = 6;
@@ -370,7 +372,7 @@ class DistanceDecoder {
   late final RangeDecoderProbabilities dist_special;
   late final RangeDecoderProbabilities dist_align;
 
-  DistanceDecoder(this._input) {
+  _DistanceDecoder(this._input) {
     dist_slot = <RangeDecoderProbabilities>[];
     for (var i = 0; i < DIST_STATES; i++) {
       dist_slot.add(RangeDecoderProbabilities(DIST_SLOTS));
