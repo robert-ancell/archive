@@ -109,8 +109,6 @@ class LzmaDecoder {
   }
 
   void reset() {
-    print('RESET');
-
     state = LzmaState.Lit_Lit;
     rep0 = 0;
     rep1 = 0;
@@ -211,7 +209,6 @@ class LzmaDecoder {
     // Add new byte to the output.
     _output[_outputPosition] = symbol;
     _outputPosition++;
-    print('LITERAL ' + symbol.toRadixString(16).padLeft(2, '0'));
 
     switch (state) {
       case LzmaState.Lit_Lit:
@@ -270,8 +267,6 @@ class LzmaDecoder {
             _input.readBittreeReverse(dist_align, 0, distance, ALIGN_BITS);
       }
     }
-
-    print('MATCH distance=$distance length=$length');
 
     _repeatData(distance, length);
 
@@ -333,7 +328,6 @@ class LzmaDecoder {
       rep0 = distance;
     }
 
-    print('REPEAT distance=$distance length=$length');
     _repeatData(distance, length);
 
     switch (state) {
