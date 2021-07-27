@@ -24,16 +24,8 @@ const int RC_MOVE_BITS = 5;
 
 const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
 
+/// FIXME: Kill
 const int LITERAL_CODER_SIZE = 0x300;
-
-const int DIST_STATES = 4;
-const int DIST_SLOT_BITS = 6;
-const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
-
-const int DIST_MODEL_START = 4;
-const int DIST_MODEL_END = 14;
-const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
-const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
 
 const int MATCH_LEN_MIN = 2;
 const int LEN_LOW_BITS = 3;
@@ -69,12 +61,9 @@ class LzmaDecoder {
 
   late final List<List<int>> literal;
 
-  late final List<List<int>> dist_slot;
-  late final List<int> dist_special;
-  late final List<int> dist_align;
-
   late final LengthDecoder _matchLengthDecoder;
   late final LengthDecoder _repeatLengthDecoder;
+  late final DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
   var rep0 = 0;
@@ -107,6 +96,7 @@ class LzmaDecoder {
 
     _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
     _repeatLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
+    _distanceDecoder = DistanceDecoder(_input);
 
     reset();
   }
@@ -133,16 +123,10 @@ class LzmaDecoder {
     for (var i = 0; i < literal.length; i++) {
       literal[i].fillRange(0, literal[i].length, DEFAULT_PROB);
     }
-    dist_slot = <List<int>>[];
-    for (var i = 0; i < DIST_STATES; i++) {
-      dist_slot.add(List<int>.filled(DIST_SLOTS, DEFAULT_PROB));
-    }
-    dist_special =
-        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, DEFAULT_PROB);
-    dist_align = List<int>.filled(ALIGN_SIZE, DEFAULT_PROB);
 
     _matchLengthDecoder.reset();
     _repeatLengthDecoder.reset();
+    _distanceDecoder.reset();
   }
 
   List<int> decode() {
@@ -245,31 +229,7 @@ class LzmaDecoder {
 
   void _decodeMatch(int posState) {
     var length = _matchLengthDecoder.readLength(posState);
-
-    var distState = length < DIST_STATES + MATCH_LEN_MIN
-        ? length - MATCH_LEN_MIN
-        : DIST_STATES - 1;
-    var probabilities = dist_slot[distState];
-    var distSlot = _input.readBittree(probabilities, DIST_SLOTS) - DIST_SLOTS;
-
-    int distance;
-    if (distSlot < DIST_MODEL_START) {
-      distance = distSlot;
-    } else {
-      var limit = (distSlot >> 1) - 1;
-      distance = 2 + (distSlot & 1);
-
-      if (distSlot < DIST_MODEL_END) {
-        distance <<= limit;
-        distance = _input.readBittreeReverse(
-            dist_special, distance - distSlot - 1, distance, limit);
-      } else {
-        distance = _input.readDirect(distance, limit - ALIGN_BITS);
-        distance <<= ALIGN_BITS;
-        distance =
-            _input.readBittreeReverse(dist_align, 0, distance, ALIGN_BITS);
-      }
-    }
+    var distance = _distanceDecoder.readDistance(length);
 
     _repeatData(distance, length);
 
@@ -494,5 +454,65 @@ class LengthDecoder {
     }
 
     return minLength + _input.readBittree(probabilities, limit) - limit;
+  }
+}
+
+// FIXME: Kill
+const int DIST_STATES = 4;
+const int DIST_SLOT_BITS = 6;
+const int DIST_SLOTS = (1 << DIST_SLOT_BITS);
+
+const int DIST_MODEL_START = 4;
+const int DIST_MODEL_END = 14;
+const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
+const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
+
+class DistanceDecoder {
+  final RangeDecoder _input;
+  late final List<List<int>> dist_slot;
+  late final List<int> dist_special;
+  late final List<int> dist_align;
+
+  DistanceDecoder(this._input) {
+    dist_slot = <List<int>>[];
+    for (var i = 0; i < DIST_STATES; i++) {
+      dist_slot.add(List<int>.filled(DIST_SLOTS, DEFAULT_PROB));
+    }
+    dist_special =
+        List<int>.filled(FULL_DISTANCES - DIST_MODEL_END, DEFAULT_PROB);
+    dist_align = List<int>.filled(ALIGN_SIZE, DEFAULT_PROB);
+  }
+
+  void reset() {
+    for (var i = 0; i < dist_slot.length; i++) {
+      dist_slot[i].fillRange(0, dist_slot[i].length, DEFAULT_PROB);
+    }
+    dist_special.fillRange(0, dist_special.length, DEFAULT_PROB);
+    dist_align.fillRange(0, dist_align.length, DEFAULT_PROB);
+  }
+
+  int readDistance(int length) {
+    var distState = length < DIST_STATES + MATCH_LEN_MIN
+        ? length - MATCH_LEN_MIN
+        : DIST_STATES - 1;
+    var probabilities = dist_slot[distState];
+    var distSlot = _input.readBittree(probabilities, DIST_SLOTS) - DIST_SLOTS;
+
+    if (distSlot < DIST_MODEL_START) {
+      return distSlot;
+    }
+
+    var limit = (distSlot >> 1) - 1;
+    var distance = 2 + (distSlot & 1);
+
+    if (distSlot < DIST_MODEL_END) {
+      distance <<= limit;
+      return _input.readBittreeReverse(
+          dist_special, distance - distSlot - 1, distance, limit);
+    } else {
+      distance = _input.readDirect(distance, limit - ALIGN_BITS);
+      distance <<= ALIGN_BITS;
+      return _input.readBittreeReverse(dist_align, 0, distance, ALIGN_BITS);
+    }
   }
 }
