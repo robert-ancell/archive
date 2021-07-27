@@ -24,9 +24,12 @@ class _XZStreamDecoder {
   // LZMA decoder.
   final decoder = LzmaDecoder();
 
+  // Stream flags, which are sent in both the header and the footer.
+  var streamFlags = 0;
+
   // Decode this stream and return the uncompressed data.
   List<int> decode(InputStreamBase input) {
-    var flags = _readStreamHeader(input);
+    _readStreamHeader(input);
 
     var blocks = <_XZBlock>[];
     while (true) {
@@ -34,7 +37,7 @@ class _XZStreamDecoder {
 
       if (blockHeader == 0) {
         var indexSize = _readStreamIndex(input, blocks);
-        _readStreamFooter(input, flags, indexSize);
+        _readStreamFooter(input, indexSize);
         var data = <int>[];
         for (var block in blocks) {
           data.addAll(block.data);
@@ -43,15 +46,15 @@ class _XZStreamDecoder {
       }
 
       var blockLength = (blockHeader + 1) * 4;
-      var block = _readBlock(input, blockLength, flags & 0xf);
+      var block = _readBlock(input, blockLength);
       blocks.add(block);
     }
 
     return data;
   }
 
-  // Reads an XZ steam header from [input] and returns the stream flags.
-  int _readStreamHeader(InputStreamBase input) {
+  // Reads an XZ steam header from [input].
+  void _readStreamHeader(InputStreamBase input) {
     var magic = input.readBytes(6);
     var magicIsValid = magic[0] == 253 &&
         magic[1] == 55 /* '7' */ &&
@@ -67,26 +70,24 @@ class _XZStreamDecoder {
     if (header.readByte() != 0) {
       throw ArchiveException('Invalid stream flags');
     }
-    var flags = header.readByte();
+    streamFlags = header.readByte();
     header.reset();
 
     var crc = input.readUint32();
     if (getCrc32(header.toUint8List()) != crc) {
       throw ArchiveException('Invalid stream header CRC checksum');
     }
-
-    return flags;
   }
 
   // Reads a data block from [input].
-  _XZBlock _readBlock(InputStreamBase input, int headerLength, int checkType) {
+  _XZBlock _readBlock(InputStreamBase input, int headerLength) {
     var header = input.readBytes(headerLength - 4);
 
     header.skip(1); // Skip length field
-    var flags = header.readByte();
-    var nFilters = (flags & 0x3) + 1;
-    var hasCompressedLength = flags & 0x40 != 0;
-    var hasUncompressedLength = flags & 0x80 != 0;
+    var blockFlags = header.readByte();
+    var nFilters = (blockFlags & 0x3) + 1;
+    var hasCompressedLength = blockFlags & 0x40 != 0;
+    var hasUncompressedLength = blockFlags & 0x80 != 0;
 
     int? compressedLength;
     if (hasCompressedLength) {
@@ -136,6 +137,7 @@ class _XZStreamDecoder {
     _readPadding(input);
 
     // Checksum
+    var checkType = streamFlags & 0xf;
     switch (checkType) {
       case 0: // none
         break;
@@ -270,8 +272,8 @@ class _XZStreamDecoder {
     return indexLength + 4;
   }
 
-  // Reads an XZ stream footer from [input] and checks it has [flags] the same as the stream header and the index size matches [indexSize].
-  void _readStreamFooter(InputStreamBase input, int flags, int indexSize) {
+  // Reads an XZ stream footer from [input] and check the index size matches [indexSize].
+  void _readStreamFooter(InputStreamBase input, int indexSize) {
     var crc = input.readUint32();
     var footer = input.readBytes(6);
     var backwardSize = (footer.readUint32() + 1) * 4;
@@ -282,7 +284,7 @@ class _XZStreamDecoder {
       throw ArchiveException('Invalid stream flags');
     }
     var footerFlags = footer.readByte();
-    if (footerFlags != flags) {
+    if (footerFlags != streamFlags) {
       throw ArchiveException("Stream footer flags don't match header flags");
     }
     footer.reset();
