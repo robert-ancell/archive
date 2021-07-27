@@ -40,10 +40,10 @@ class LzmaDecoder {
   late final _DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
-  var distance0 = 0;
-  var distance1 = 0;
-  var distance2 = 0;
-  var distance3 = 0;
+  var _distance0 = 0;
+  var _distance1 = 0;
+  var _distance2 = 0;
+  var _distance3 = 0;
 
   // Decoder state, used in range decoding.
   var state = _LzmaState.Lit_Lit;
@@ -96,10 +96,10 @@ class LzmaDecoder {
 
   void reset() {
     state = _LzmaState.Lit_Lit;
-    distance0 = 0;
-    distance1 = 0;
-    distance2 = 0;
-    distance3 = 0;
+    _distance0 = 0;
+    _distance1 = 0;
+    _distance2 = 0;
+    _distance3 = 0;
 
     for (var tree in _nonLiteralProbabilities) {
       tree.reset();
@@ -174,7 +174,7 @@ class LzmaDecoder {
       value = _input.readBittree(probabilities[0], 8);
     } else {
       // Get the last byte before the match that just occurred.
-      prevByte = _output[_outputPosition - distance0 - 1];
+      prevByte = _output[_outputPosition - _distance0 - 1];
 
       value = 0;
       var symbolPrefix = 1;
@@ -236,10 +236,10 @@ class LzmaDecoder {
 
     _repeatData(distance, length);
 
-    distance3 = distance2;
-    distance2 = distance1;
-    distance1 = distance0;
-    distance0 = distance;
+    _distance3 = _distance2;
+    _distance2 = _distance1;
+    _distance1 = _distance0;
+    _distance0 = distance;
 
     state =
         _prevPacketIsLiteral() ? _LzmaState.Lit_Match : _LzmaState.NonLit_Match;
@@ -251,29 +251,29 @@ class LzmaDecoder {
     if (_input.readBit(_repeat0Probabilities, state.index) == 0) {
       if (_input.readBit(_longRepeat0Probabilities[state.index], posState) ==
           0) {
-        _repeatData(distance0, 1);
+        _repeatData(_distance0, 1);
         state = _prevPacketIsLiteral()
             ? _LzmaState.Lit_ShortRep
             : _LzmaState.NonLit_Rep;
         return;
       } else {
-        distance = distance0;
+        distance = _distance0;
       }
     } else if (_input.readBit(_repeat1Probabilities, state.index) == 0) {
-      distance = distance1;
-      distance1 = distance0;
-      distance0 = distance;
+      distance = _distance1;
+      _distance1 = _distance0;
+      _distance0 = distance;
     } else if (_input.readBit(_repeat2Probabilities, state.index) == 0) {
-      distance = distance2;
-      distance2 = distance1;
-      distance1 = distance0;
-      distance0 = distance;
+      distance = _distance2;
+      _distance2 = _distance1;
+      _distance1 = _distance0;
+      _distance0 = distance;
     } else {
-      distance = distance3;
-      distance3 = distance2;
-      distance2 = distance1;
-      distance1 = distance0;
-      distance0 = distance;
+      distance = _distance3;
+      _distance3 = _distance2;
+      _distance2 = _distance1;
+      _distance1 = _distance0;
+      _distance0 = distance;
     }
 
     var length = _repeatLengthDecoder.readLength(posState);
