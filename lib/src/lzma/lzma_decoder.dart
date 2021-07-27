@@ -25,7 +25,6 @@ const int RC_MOVE_BITS = 5;
 const int DEFAULT_PROB = RC_BIT_MODEL_TOTAL ~/ 2;
 
 const int LITERAL_CODER_SIZE = 0x300;
-const int LITERAL_CODERS_MAX = (1 << 4);
 
 const int DIST_STATES = 4;
 const int DIST_SLOT_BITS = 6;
@@ -100,6 +99,12 @@ class LzmaDecoder {
     _positionMask = (1 << positionBits) - 1;
     _literalPositionMask = (1 << literalPositionBits) - 1;
 
+    literal = <List<int>>[];
+    var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
+    for (var i = 0; i < maxLiteralCodes; i++) {
+      literal.add(List<int>.filled(LITERAL_CODER_SIZE, DEFAULT_PROB));
+    }
+
     _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
     _repeatLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
 
@@ -125,9 +130,8 @@ class LzmaDecoder {
     }
     is_rep1 = List<int>.filled(16, DEFAULT_PROB);
     is_rep2 = List<int>.filled(16, DEFAULT_PROB);
-    literal = <List<int>>[];
-    for (var i = 0; i < LITERAL_CODERS_MAX; i++) {
-      literal.add(List<int>.filled(LITERAL_CODER_SIZE, DEFAULT_PROB));
+    for (var i = 0; i < literal.length; i++) {
+      literal[i].fillRange(0, literal[i].length, DEFAULT_PROB);
     }
     dist_slot = <List<int>>[];
     for (var i = 0; i < DIST_STATES; i++) {
