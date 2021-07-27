@@ -41,7 +41,7 @@ class LzmaDecoder {
   late final List<int> is_rep1;
   late final List<int> is_rep2;
 
-  late final List<List<int>> literal;
+  late final List<List<int>> _literalProbabilities;
 
   late final LengthDecoder _matchLengthDecoder;
   late final LengthDecoder _repeatLengthDecoder;
@@ -81,10 +81,10 @@ class LzmaDecoder {
     }
     is_rep1 = _input.makeProbabilityTree(16);
     is_rep2 = _input.makeProbabilityTree(16);
-    literal = <List<int>>[];
+    _literalProbabilities = <List<int>>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralCodes; i++) {
-      literal.add(_input.makeProbabilityTree(LITERAL_CODER_SIZE));
+      _literalProbabilities.add(_input.makeProbabilityTree(LITERAL_CODER_SIZE));
     }
 
     _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
@@ -111,8 +111,8 @@ class LzmaDecoder {
     }
     _input.resetProbabilityTree(is_rep1);
     _input.resetProbabilityTree(is_rep2);
-    for (var i = 0; i < literal.length; i++) {
-      _input.resetProbabilityTree(literal[i]);
+    for (var i = 0; i < _literalProbabilities.length; i++) {
+      _input.resetProbabilityTree(_literalProbabilities[i]);
     }
 
     _matchLengthDecoder.reset();
@@ -142,7 +142,7 @@ class LzmaDecoder {
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
     var high = (_outputPosition & positionMask) << _literalContextBits;
-    var probabilities = literal[low + high];
+    var probabilities = _literalProbabilities[low + high];
 
     int symbol;
     switch (state) {
