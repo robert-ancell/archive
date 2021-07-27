@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../util/input_stream.dart';
 
 // Number of bits used for probabilities.
@@ -12,10 +14,11 @@ const int _probabilityHalf = _probabilityOne ~/ 2;
 // Probability table used with [RangeDecoder].
 class RangeDecoderTable {
   // Table of probabilities for each symbol.
-  final List<int> table; // FIXME 16
+  final Uint16List table;
 
-  RangeDecoderTable(int length)
-      : table = List<int>.filled(length, _probabilityHalf);
+  RangeDecoderTable(int length) : table = Uint16List(length) {
+    reset();
+  }
 
   void reset() {
     table.fillRange(0, table.length, _probabilityHalf);
