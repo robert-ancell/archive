@@ -75,16 +75,21 @@ class LzmaDecoder {
 
     _matchProbabilities = <List<int>>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _matchProbabilities.add(_input.makeProbabilityTree(16));
+      _matchProbabilities
+          .add(_input.makeProbabilityTree(_LzmaState.values.length));
     }
-    _repeatProbabilities = _input.makeProbabilityTree(16);
-    _repeat0Probabilities = _input.makeProbabilityTree(16);
+    _repeatProbabilities = _input.makeProbabilityTree(_LzmaState.values.length);
+    _repeat0Probabilities =
+        _input.makeProbabilityTree(_LzmaState.values.length);
     _longRepeat0Probabilities = <List<int>>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _longRepeat0Probabilities.add(_input.makeProbabilityTree(16));
+      _longRepeat0Probabilities
+          .add(_input.makeProbabilityTree(_LzmaState.values.length));
     }
-    _repeat1Probabilities = _input.makeProbabilityTree(16);
-    _repeat2Probabilities = _input.makeProbabilityTree(16);
+    _repeat1Probabilities =
+        _input.makeProbabilityTree(_LzmaState.values.length);
+    _repeat2Probabilities =
+        _input.makeProbabilityTree(_LzmaState.values.length);
     _literalProbabilities = <List<int>>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
     for (var i = 0; i < maxLiteralCodes; i++) {
