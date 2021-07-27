@@ -47,8 +47,8 @@ class LzmaDecoder {
 
   late final List<RangeDecoderProbabilities> _literalProbabilities;
 
-  late final LengthDecoder _matchLengthDecoder;
-  late final LengthDecoder _repeatLengthDecoder;
+  late final _LengthDecoder _matchLengthDecoder;
+  late final _LengthDecoder _repeatLengthDecoder;
   late final DistanceDecoder _distanceDecoder;
 
   // Distances used in matches that can be repeated.
@@ -93,8 +93,8 @@ class LzmaDecoder {
       _literalProbabilities.add(RangeDecoderProbabilities(LITERAL_CODER_SIZE));
     }
 
-    _matchLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
-    _repeatLengthDecoder = LengthDecoder(_input, positionBits: positionBits);
+    _matchLengthDecoder = _LengthDecoder(_input, positionBits: positionBits);
+    _repeatLengthDecoder = _LengthDecoder(_input, positionBits: positionBits);
     _distanceDecoder = DistanceDecoder(_input);
 
     reset();
@@ -172,7 +172,7 @@ class LzmaDecoder {
 
     int symbol;
     if (_prevLiteral()) {
-      symbol = _input.readBittree(probabilities, 0x100) & 0xff;
+      symbol = _input.readBittree(probabilities, 8);
     } else {
       // Get the last byte before this match.
       var matchByte = _output[_outputPosition - distance0 - 1] << 1;
@@ -297,65 +297,60 @@ class LzmaDecoder {
 
 const int MATCH_LEN_MIN = 2;
 
-class LengthDecoder {
-  static const int LEN_LOW_BITS = 3;
-  static const int LEN_LOW_SYMBOLS = (1 << LEN_LOW_BITS);
-  static const int LEN_MID_BITS = 3;
-  static const int LEN_MID_SYMBOLS = (1 << LEN_MID_BITS);
-  static const int LEN_HIGH_BITS = 8;
-  static const int LEN_HIGH_SYMBOLS = (1 << LEN_HIGH_BITS);
-
+// Decodes length fields from LZMA data.
+class _LengthDecoder {
+  // Data being read from.
   final RangeDecoder _input;
 
-  // Probabilty trees for decoding lengths.
+  // Probabilities
   late final RangeDecoderProbabilities lengthChoice;
-  late final List<RangeDecoderProbabilities> low;
-  late final List<RangeDecoderProbabilities> mid;
-  late final RangeDecoderProbabilities high;
 
-  LengthDecoder(this._input, {required int positionBits}) {
+  // Bit probabilities when lengths are in the short form (2-9).
+  late final List<RangeDecoderProbabilities> shortProbabilities;
+
+  // Bit probabilities when lengths are in the medium form (10-17).
+  late final List<RangeDecoderProbabilities> mediumProbabilities;
+
+  // Bit probabilities when lengths are in the long form (18-273).
+  late final RangeDecoderProbabilities longProbabilities;
+
+  _LengthDecoder(this._input, {required int positionBits}) {
     lengthChoice = RangeDecoderProbabilities(2);
-    low = <RangeDecoderProbabilities>[];
-    mid = <RangeDecoderProbabilities>[];
+    shortProbabilities = <RangeDecoderProbabilities>[];
+    mediumProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < 1 << positionBits; i++) {
-      low.add(RangeDecoderProbabilities(LEN_LOW_SYMBOLS));
-      mid.add(RangeDecoderProbabilities(LEN_MID_SYMBOLS));
+      shortProbabilities.add(RangeDecoderProbabilities(8));
+      mediumProbabilities.add(RangeDecoderProbabilities(8));
     }
-    high = RangeDecoderProbabilities(LEN_HIGH_SYMBOLS);
+    longProbabilities = RangeDecoderProbabilities(256);
+
     reset();
   }
 
+  // Reset this decoder.
   void reset() {
     lengthChoice.reset();
-    for (var tree in low) {
+    for (var tree in shortProbabilities) {
       tree.reset();
     }
-    for (var tree in mid) {
+    for (var tree in mediumProbabilities) {
       tree.reset();
     }
-    high.reset();
+    longProbabilities.reset();
   }
 
+  // Read a length field from the range decoder.
   int readLength(int posState) {
-    int limit;
-    RangeDecoderProbabilities probabilities;
-
-    int minLength;
     if (_input.readBit(lengthChoice, 0) == 0) {
-      minLength = MATCH_LEN_MIN;
-      limit = LEN_LOW_SYMBOLS;
-      probabilities = low[posState];
+      // 0xxx - Length 2 - 9
+      return 2 + _input.readBittree(shortProbabilities[posState], 3);
     } else if (_input.readBit(lengthChoice, 1) == 0) {
-      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS;
-      limit = LEN_MID_SYMBOLS;
-      probabilities = mid[posState];
+      // 10xxx - Length 10 - 17
+      return 10 + _input.readBittree(mediumProbabilities[posState], 3);
     } else {
-      minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS + LEN_MID_SYMBOLS;
-      limit = LEN_HIGH_SYMBOLS;
-      probabilities = high;
+      // 11xxxxxxxx - Length 18 - 273
+      return 18 + _input.readBittree(longProbabilities, 8);
     }
-
-    return minLength + _input.readBittree(probabilities, limit) - limit;
   }
 }
 
@@ -400,7 +395,7 @@ class DistanceDecoder {
         ? length - MATCH_LEN_MIN
         : DIST_STATES - 1;
     var probabilities = dist_slot[distState];
-    var distSlot = _input.readBittree(probabilities, DIST_SLOTS) - DIST_SLOTS;
+    var distSlot = _input.readBittree(probabilities, DIST_SLOT_BITS);
 
     if (distSlot < DIST_MODEL_START) {
       return distSlot;

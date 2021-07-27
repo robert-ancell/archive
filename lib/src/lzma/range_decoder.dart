@@ -51,15 +51,16 @@ class RangeDecoder {
     }
   }
 
-  int readBittree(RangeDecoderProbabilities probabilities, int limit) {
-    var symbol = 1;
-    while (true) {
-      var b = readBit(probabilities, symbol);
+  int readBittree(RangeDecoderProbabilities probabilities, int count) {
+    var symbol = 0;
+    var x = 1; // FIXME: Why is this here?
+    for (var i = 0; i < count; i++) {
+      var b = readBit(probabilities, x | symbol);
       symbol = (symbol << 1) | b;
-      if (symbol >= limit) {
-        return symbol;
-      }
+      x <<= 1;
     }
+
+    return symbol;
   }
 
   int readBittreeReverse(RangeDecoderProbabilities probabilities, int offset,
