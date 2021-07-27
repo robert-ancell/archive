@@ -54,9 +54,9 @@ class LzmaDecoder {
   late final List<int> _output; // FIXME: Uint8List
   var _outputPosition = 0;
 
-  final int _literalContextBits;
   late final int _positionMask;
-  late final int _literalPositionMask;
+  final int _literalPositionBits;
+  final int _literalContextBits;
 
   // Probabilty trees
   // FIXME: uint16
@@ -88,16 +88,16 @@ class LzmaDecoder {
   LzmaDecoder(
       {required InputStreamBase input,
       required int uncompressedLength,
-      required int literalContextBits,
       required int literalPositionBits,
+      required int literalContextBits,
       required int positionBits})
-      : _literalContextBits = literalContextBits {
+      : _literalPositionBits = literalPositionBits,
+        _literalContextBits = literalContextBits {
     _input = RangeDecoder(input);
 
     _output = List<int>.filled(uncompressedLength, 0);
 
     _positionMask = (1 << positionBits) - 1;
-    _literalPositionMask = (1 << literalPositionBits) - 1;
 
     literal = <List<int>>[];
     var maxLiteralCodes = 1 << (literalPositionBits + literalContextBits);
@@ -164,7 +164,8 @@ class LzmaDecoder {
     // Get probabilities based on previous byte written.
     var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
     var low = prevByte >> (8 - _literalContextBits);
-    var high = (_outputPosition & _literalPositionMask) << _literalContextBits;
+    var positionMask = (1 << _literalPositionBits) - 1;
+    var high = (_outputPosition & positionMask) << _literalContextBits;
     var probabilities = literal[low + high];
 
     int symbol;
