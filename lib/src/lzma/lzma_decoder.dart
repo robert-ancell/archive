@@ -142,6 +142,25 @@ class LzmaDecoder {
     return _output;
   }
 
+  bool _prevLiteral() {
+    switch (state) {
+      case _LzmaState.Lit_Lit:
+      case _LzmaState.Match_Lit_Lit:
+      case _LzmaState.Rep_Lit_Lit:
+      case _LzmaState.ShortRep_Lit_Lit:
+      case _LzmaState.Match_Lit:
+      case _LzmaState.Rep_Lit:
+      case _LzmaState.ShortRep_Lit:
+        return true;
+      case _LzmaState.Lit_Match:
+      case _LzmaState.Lit_LongRep:
+      case _LzmaState.Lit_ShortRep:
+      case _LzmaState.NonLit_Match:
+      case _LzmaState.NonLit_Rep:
+        return false;
+    }
+  }
+
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
     var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
@@ -151,44 +170,31 @@ class LzmaDecoder {
     var probabilities = _literalProbabilities[low + high];
 
     int symbol;
-    switch (state) {
-      case _LzmaState.Lit_Lit:
-      case _LzmaState.Match_Lit_Lit:
-      case _LzmaState.Rep_Lit_Lit:
-      case _LzmaState.ShortRep_Lit_Lit:
-      case _LzmaState.Match_Lit:
-      case _LzmaState.Rep_Lit:
-      case _LzmaState.ShortRep_Lit:
-        symbol = _input.readBittree(probabilities, 0x100) & 0xff;
-        break;
-      case _LzmaState.Lit_Match:
-      case _LzmaState.Lit_LongRep:
-      case _LzmaState.Lit_ShortRep:
-      case _LzmaState.NonLit_Match:
-      case _LzmaState.NonLit_Rep:
-        // Get the last byte before this match.
-        var matchByte = _output[_outputPosition - distance0 - 1] << 1;
+    if (_prevLiteral()) {
+      symbol = _input.readBittree(probabilities, 0x100) & 0xff;
+    } else {
+      // Get the last byte before this match.
+      var matchByte = _output[_outputPosition - distance0 - 1] << 1;
 
-        symbol = 1;
-        var offset = 0x100;
-        while (true) {
-          var matchBit = matchByte & offset;
-          matchByte <<= 1;
-          var i = offset + matchBit + symbol;
+      symbol = 1;
+      var offset = 0x100;
+      while (true) {
+        var matchBit = matchByte & offset;
+        matchByte <<= 1;
+        var i = offset + matchBit + symbol;
 
-          var b = _input.readBit(probabilities, i);
-          symbol = (symbol << 1) | b;
-          if (b != 0) {
-            offset &= matchBit;
-          } else {
-            offset &= matchBit ^ 0xffffffff;
-          }
-          if (symbol >= 0x100) {
-            symbol &= 0xff;
-            break;
-          }
+        var b = _input.readBit(probabilities, i);
+        symbol = (symbol << 1) | b;
+        if (b != 0) {
+          offset &= matchBit;
+        } else {
+          offset &= matchBit ^ 0xffffffff;
         }
-        break;
+        if (symbol >= 0x100) {
+          symbol &= 0xff;
+          break;
+        }
+      }
     }
 
     // Add new byte to the output.
@@ -236,24 +242,7 @@ class LzmaDecoder {
     distance1 = distance0;
     distance0 = distance;
 
-    switch (state) {
-      case _LzmaState.Lit_Lit:
-      case _LzmaState.Match_Lit_Lit:
-      case _LzmaState.Rep_Lit_Lit:
-      case _LzmaState.ShortRep_Lit_Lit:
-      case _LzmaState.Match_Lit:
-      case _LzmaState.Rep_Lit:
-      case _LzmaState.ShortRep_Lit:
-        state = _LzmaState.Lit_Match;
-        break;
-      case _LzmaState.Lit_Match:
-      case _LzmaState.Lit_LongRep:
-      case _LzmaState.Lit_ShortRep:
-      case _LzmaState.NonLit_Match:
-      case _LzmaState.NonLit_Rep:
-        state = _LzmaState.NonLit_Match;
-        break;
-    }
+    state = _prevLiteral() ? _LzmaState.Lit_Match : _LzmaState.NonLit_Match;
   }
 
   void _decodeRepeat(int posState) {
@@ -292,24 +281,7 @@ class LzmaDecoder {
 
     _repeatData(distance, length);
 
-    switch (state) {
-      case _LzmaState.Lit_Lit:
-      case _LzmaState.Match_Lit_Lit:
-      case _LzmaState.Rep_Lit_Lit:
-      case _LzmaState.ShortRep_Lit_Lit:
-      case _LzmaState.Match_Lit:
-      case _LzmaState.Rep_Lit:
-      case _LzmaState.ShortRep_Lit:
-        state = literalState;
-        break;
-      case _LzmaState.Lit_Match:
-      case _LzmaState.Lit_LongRep:
-      case _LzmaState.Lit_ShortRep:
-      case _LzmaState.NonLit_Match:
-      case _LzmaState.NonLit_Rep:
-        state = _LzmaState.NonLit_Rep;
-        break;
-    }
+    state = _prevLiteral() ? literalState : _LzmaState.NonLit_Rep;
   }
 
   // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
