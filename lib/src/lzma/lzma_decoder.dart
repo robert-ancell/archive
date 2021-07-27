@@ -38,7 +38,7 @@ class LzmaDecoder {
   final int _literalContextBits;
 
   // Probabilty trees
-  late final List<RangeDecoderProbabilities> _matchProbabilities;
+  late final List<RangeDecoderProbabilities> _nonLiteralProbabilities;
   late final RangeDecoderProbabilities _repeatProbabilities;
   late final RangeDecoderProbabilities _repeat0Probabilities;
   late final List<RangeDecoderProbabilities> _longRepeat0Probabilities;
@@ -73,9 +73,9 @@ class LzmaDecoder {
 
     _output = List<int>.filled(uncompressedLength, 0);
 
-    _matchProbabilities = <RangeDecoderProbabilities>[];
+    _nonLiteralProbabilities = <RangeDecoderProbabilities>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _matchProbabilities
+      _nonLiteralProbabilities
           .add(RangeDecoderProbabilities(_LzmaState.values.length));
     }
     _repeatProbabilities = RangeDecoderProbabilities(_LzmaState.values.length);
@@ -107,7 +107,7 @@ class LzmaDecoder {
     distance2 = 0;
     distance3 = 0;
 
-    for (var tree in _matchProbabilities) {
+    for (var tree in _nonLiteralProbabilities) {
       tree.reset();
     }
     _repeatProbabilities.reset();
@@ -130,7 +130,8 @@ class LzmaDecoder {
     while (_outputPosition < _output.length) {
       var positionMask = (1 << _positionBits) - 1;
       var posState = _outputPosition & positionMask;
-      if (_input.readBit(_matchProbabilities[state.index], posState) == 0) {
+      if (_input.readBit(_nonLiteralProbabilities[state.index], posState) ==
+          0) {
         _decodeLiteral();
       } else if (_input.readBit(_repeatProbabilities, state.index) == 0) {
         _decodeMatch(posState);
