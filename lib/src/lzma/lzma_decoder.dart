@@ -387,11 +387,8 @@ class DistanceDecoder {
 
   static const int DIST_MODEL_START = 4;
   static const int DIST_MODEL_END = 14;
-  static const int FULL_DISTANCES_BITS = (DIST_MODEL_END ~/ 2);
-  static const int FULL_DISTANCES = (1 << FULL_DISTANCES_BITS);
 
   static const int ALIGN_BITS = 4;
-  static const int ALIGN_SIZE = (1 << ALIGN_BITS);
 
   final RangeDecoder _input;
   late final List<List<int>> dist_slot;
@@ -403,8 +400,11 @@ class DistanceDecoder {
     for (var i = 0; i < DIST_STATES; i++) {
       dist_slot.add(_input.makeProbabilityTree(DIST_SLOTS));
     }
-    dist_special = _input.makeProbabilityTree(FULL_DISTANCES - DIST_MODEL_END);
-    dist_align = _input.makeProbabilityTree(ALIGN_SIZE);
+    var fullDistancesBits = (DIST_MODEL_END ~/ 2);
+    var fullDistances = (1 << fullDistancesBits);
+    dist_special = _input.makeProbabilityTree(fullDistances - DIST_MODEL_END);
+    var alignSize = 1 << ALIGN_BITS;
+    dist_align = _input.makeProbabilityTree(alignSize);
   }
 
   void reset() {
