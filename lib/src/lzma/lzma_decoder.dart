@@ -369,8 +369,8 @@ class _DistanceDecoder {
 
   final RangeDecoder _input;
   late final List<RangeDecoderProbabilities> _slotProbabilities;
-  late final RangeDecoderProbabilities dist_special;
-  late final RangeDecoderProbabilities dist_align;
+  late final RangeDecoderProbabilities _specialProbabilities;
+  late final RangeDecoderProbabilities _alignProbabilities;
 
   _DistanceDecoder(this._input) {
     _slotProbabilities = <RangeDecoderProbabilities>[];
@@ -379,9 +379,10 @@ class _DistanceDecoder {
     }
     var fullDistancesBits = (DIST_MODEL_END ~/ 2);
     var fullDistances = (1 << fullDistancesBits);
-    dist_special = RangeDecoderProbabilities(fullDistances - DIST_MODEL_END);
+    _specialProbabilities =
+        RangeDecoderProbabilities(fullDistances - DIST_MODEL_END);
     var alignSize = 1 << ALIGN_BITS;
-    dist_align = RangeDecoderProbabilities(alignSize);
+    _alignProbabilities = RangeDecoderProbabilities(alignSize);
   }
 
   // Reset this decoder.
@@ -389,8 +390,8 @@ class _DistanceDecoder {
     for (var tree in _slotProbabilities) {
       tree.reset();
     }
-    dist_special.reset();
-    dist_align.reset();
+    _specialProbabilities.reset();
+    _alignProbabilities.reset();
   }
 
   // Reads a distance field.
@@ -398,25 +399,26 @@ class _DistanceDecoder {
     var distState = length < DIST_STATES + MATCH_LEN_MIN
         ? length - MATCH_LEN_MIN
         : DIST_STATES - 1;
-    var slot =
-        _input.readBittree(_slotProbabilities[distState], DIST_SLOT_BITS);
+    var probabilities = _slotProbabilities[distState];
 
+    var slot = _input.readBittree(probabilities, DIST_SLOT_BITS);
     if (slot < DIST_MODEL_START) {
       return slot;
     }
 
-    var limit = (slot >> 1) - 1;
-    var distance = 2 + (slot & 1);
+    var bitCount = (slot >> 1) - 1;
+    var prefix = 0x2 | (slot & 0x1);
 
     if (slot < DIST_MODEL_END) {
-      distance <<= limit;
-      return distance |
-          _input.readBittreeReverse(dist_special, distance - slot - 1, limit);
+      return prefix << bitCount |
+          _input.readBittreeReverse(
+              _specialProbabilities, (prefix << bitCount) - slot - 1, bitCount);
     } else {
-      distance <<= limit - ALIGN_BITS;
-      distance |= _input.readDirect(limit - ALIGN_BITS);
-      distance <<= ALIGN_BITS;
-      return distance | _input.readBittreeReverse(dist_align, 0, ALIGN_BITS);
+      var directCount = bitCount - ALIGN_BITS;
+      var directBits = _input.readDirect(directCount);
+      var alignBits =
+          _input.readBittreeReverse(_alignProbabilities, 0, ALIGN_BITS);
+      return prefix << bitCount | directBits << ALIGN_BITS | alignBits;
     }
   }
 }
