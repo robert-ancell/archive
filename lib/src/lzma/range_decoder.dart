@@ -25,7 +25,10 @@ class RangeDecoderProbabilities {
 // Implements the LZMA range decoder.
 class RangeDecoder {
   // Data being read from.
-  final InputStreamBase _input;
+  late final InputStreamBase _input;
+
+  // True once initialization bytes have been loaded.
+  var _initialized = false;
 
   // Mask showing the current bits in [code].
   var range = 0xffffffff;
@@ -33,16 +36,20 @@ class RangeDecoder {
   // Current code being stored.
   var code = 0;
 
-  RangeDecoder(this._input) {
-    // Skip the first byte, then load four for the initial state.
-    _input.skip(1);
-    for (var i = 0; i < 4; i++) {
-      code = (code << 8 | _input.readByte());
-    }
-  }
+  // Set the input being read from. Must be set before initializing or reading bits.
+  void set input(InputStreamBase value) => _input = value;
 
   // Read a single bit from the decoder, using the supplied [index] into a [probabilities] table.
   int readBit(RangeDecoderProbabilities probabilities, int index) {
+    if (!_initialized) {
+      // Skip the first byte, then load four for the initial state.
+      _input.skip(1);
+      for (var i = 0; i < 4; i++) {
+        code = (code << 8 | _input.readByte());
+      }
+      _initialized = true;
+    }
+
     _load();
 
     var p = probabilities.probabilities[index];

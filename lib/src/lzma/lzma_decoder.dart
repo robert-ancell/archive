@@ -4,7 +4,7 @@ import 'range_decoder.dart';
 
 class LzmaDecoder {
   // Compressed data.
-  late final RangeDecoder _input;
+  final _input = RangeDecoder();
 
   // Uncompressed data.
   late final List<int> _output; // FIXME: Uint8List
@@ -58,7 +58,7 @@ class LzmaDecoder {
       : _positionBits = positionBits,
         _literalPositionBits = literalPositionBits,
         _literalContextBits = literalContextBits {
-    _input = RangeDecoder(input);
+    _input.input = input;
 
     _output = List<int>.filled(uncompressedLength, 0);
 
