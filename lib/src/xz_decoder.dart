@@ -11,6 +11,15 @@ class XZDecoder {
   }
 
   List<int> decodeBuffer(InputStreamBase input, {bool verify = false}) {
+    var decoder = _XZStreamDecoder();
+    return decoder.decode(input);
+  }
+}
+
+/// Decodes an XZ stream.
+class _XZStreamDecoder {
+  // Decode this stream and return the uncompressed data.
+  List<int> decode(InputStreamBase input) {
     var flags = _readStreamHeader(input);
 
     var blocks = <_XZBlock>[];
@@ -61,6 +70,7 @@ class XZDecoder {
     return flags;
   }
 
+  // Reads a data block from [input].
   _XZBlock _readBlock(InputStreamBase input, int headerLength, int checkType) {
     var header = input.readBytes(headerLength - 4);
 
