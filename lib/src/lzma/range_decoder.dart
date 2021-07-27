@@ -64,10 +64,10 @@ class RangeDecoder {
   }
 
   int readBittreeReverse(
-      RangeDecoderProbabilities probabilities, int offset, int limit) {
+      RangeDecoderProbabilities probabilities, int offset, int count) {
     var symbol = 1;
     var value = 0;
-    for (var i = 0; i < limit; i++) {
+    for (var i = 0; i < count; i++) {
       var b = readBit(probabilities, offset + symbol);
       symbol = (symbol << 1) | b;
       value |= b << i;
@@ -76,9 +76,10 @@ class RangeDecoder {
     return value;
   }
 
-  int readDirect(int limit) {
+  // Read [count] bits directly from the decoder.
+  int readDirect(int count) {
     var value = 0;
-    while (true) {
+    for (var i = 0; i < count; i++) {
       _normalize();
       range >>= 1;
       code -= range;
@@ -88,11 +89,9 @@ class RangeDecoder {
       } else {
         value++;
       }
-      limit--;
-      if (limit <= 0) {
-        return value;
-      }
     }
+
+    return value;
   }
 
   void _normalize() {
