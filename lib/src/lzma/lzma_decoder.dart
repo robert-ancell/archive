@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../util/input_stream.dart';
 
 import 'range_decoder.dart';
@@ -47,7 +49,8 @@ class LzmaDecoder {
   var state = _LzmaState.Lit_Lit;
 
   // Decoded data, which is able to be copied.
-  final _dictionary = <int>[];
+  var _dictionary = Uint8List(0);
+  var _writePosition = 0;
 
   /// Creates an LZMA decoder.
   LzmaDecoder() {
@@ -124,21 +127,28 @@ class LzmaDecoder {
     _distanceDecoder.reset();
 
     if (resetDictionary) {
-      _dictionary.clear();
+      _dictionary = Uint8List(0);
+      _writePosition = 0;
     }
   }
 
   // Decode [input] which contains compressed LZMA data that unpacks to [uncompressedLength] bytes.
-  List<int> decode(InputStreamBase input, int uncompressedLength) {
+  Uint8List decode(InputStreamBase input, int uncompressedLength) {
     _input.input = input;
 
+    // Expand dictionary to fit new data.
     var initialSize = _dictionary.length;
     var finalSize = initialSize + uncompressedLength;
+    var newDictionary = Uint8List(finalSize);
+    for (var i = 0; i < initialSize; i++) {
+      newDictionary[i] = _dictionary[i];
+    }
+    _dictionary = newDictionary;
 
     // Decode packets (literal, match or repeat) until all the data has been decoded.
-    while (_dictionary.length < finalSize) {
+    while (_writePosition < finalSize) {
       var positionMask = (1 << _positionBits) - 1;
-      var posState = _dictionary.length & positionMask;
+      var posState = _writePosition & positionMask;
       if (_input.readBit(_nonLiteralTables[state.index], posState) == 0) {
         _decodeLiteral();
       } else if (_input.readBit(_repeatTable, state.index) == 0) {
@@ -175,10 +185,10 @@ class LzmaDecoder {
   // Decode a packet containing a literal byte.
   void _decodeLiteral() {
     // Get probabilities based on previous byte written.
-    var prevByte = _dictionary.length > 0 ? _dictionary.last : 0;
+    var prevByte = _writePosition > 0 ? _dictionary[_writePosition - 1] : 0;
     var low = prevByte >> (8 - _literalContextBits);
     var positionMask = (1 << _literalPositionBits) - 1;
-    var high = (_dictionary.length & positionMask) << _literalContextBits;
+    var high = (_writePosition & positionMask) << _literalContextBits;
     var hash = low + high;
     var table = _literalTables[hash];
 
@@ -187,7 +197,7 @@ class LzmaDecoder {
       value = _input.readBittree(table, 8);
     } else {
       // Get the last byte before the match that just occurred.
-      prevByte = _dictionary[_dictionary.length - _distance0 - 1];
+      prevByte = _dictionary[_writePosition - _distance0 - 1];
 
       value = 0;
       var symbolPrefix = 1;
@@ -211,7 +221,8 @@ class LzmaDecoder {
     }
 
     // Add new byte to the output.
-    _dictionary.add(value);
+    _dictionary[_writePosition] = value;
+    _writePosition++;
 
     // Update state.
     switch (state) {
@@ -300,9 +311,10 @@ class LzmaDecoder {
 
   // Repeat decompressed data, starting [distance] bytes back from the end of the buffer and copying [length] bytes.
   void _repeatData(int distance, int length) {
-    var start = _dictionary.length - distance - 1;
+    var start = _writePosition - distance - 1;
     for (var i = 0; i < length; i++) {
-      _dictionary.add(_dictionary[start + i]);
+      _dictionary[_writePosition] = _dictionary[start + i];
+      _writePosition++;
     }
   }
 }
