@@ -165,7 +165,7 @@ class LzmaDecoder {
     var prevByte = _outputPosition > 0 ? _output[_outputPosition - 1] : 0;
     var low = prevByte >> (8 - _literalContextBits);
     var high = (_outputPosition & _literalPositionMask) << _literalContextBits;
-    var probs = literal[low + high];
+    var probabilities = literal[low + high];
 
     int symbol;
     switch (state) {
@@ -176,7 +176,7 @@ class LzmaDecoder {
       case LzmaState.Match_Lit:
       case LzmaState.Rep_Lit:
       case LzmaState.ShortRep_Lit:
-        symbol = _input.readBittree(probs, 0x100) & 0xff;
+        symbol = _input.readBittree(probabilities, 0x100) & 0xff;
         break;
       case LzmaState.Lit_Match:
       case LzmaState.Lit_LongRep:
@@ -193,7 +193,7 @@ class LzmaDecoder {
           matchByte <<= 1;
           var i = offset + matchBit + symbol;
 
-          var b = _input.readBit(probs, i);
+          var b = _input.readBit(probabilities, i);
           symbol = (symbol << 1) | b;
           if (b != 0) {
             offset &= matchBit;
@@ -248,8 +248,8 @@ class LzmaDecoder {
     var distState = length < DIST_STATES + MATCH_LEN_MIN
         ? length - MATCH_LEN_MIN
         : DIST_STATES - 1;
-    var probs = dist_slot[distState];
-    var distSlot = _input.readBittree(probs, DIST_SLOTS) - DIST_SLOTS;
+    var probabilities = dist_slot[distState];
+    var distSlot = _input.readBittree(probabilities, DIST_SLOTS) - DIST_SLOTS;
 
     int distance;
     if (distSlot < DIST_MODEL_START) {
@@ -476,22 +476,22 @@ class LengthDecoder {
   int readLength(int posState) {
     int minLength;
     int limit;
-    List<int> probs;
+    List<int> probabilities;
 
     if (_input.readBit(lengthChoice, 0) == 0) {
       minLength = MATCH_LEN_MIN;
       limit = LEN_LOW_SYMBOLS;
-      probs = low[posState];
+      probabilities = low[posState];
     } else if (_input.readBit(lengthChoice, 1) == 0) {
       minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS;
       limit = LEN_MID_SYMBOLS;
-      probs = mid[posState];
+      probabilities = mid[posState];
     } else {
       minLength = MATCH_LEN_MIN + LEN_LOW_SYMBOLS + LEN_MID_SYMBOLS;
       limit = LEN_HIGH_SYMBOLS;
-      probs = high;
+      probabilities = high;
     }
 
-    return minLength + _input.readBittree(probs, limit) - limit;
+    return minLength + _input.readBittree(probabilities, limit) - limit;
   }
 }
