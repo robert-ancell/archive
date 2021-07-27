@@ -39,7 +39,7 @@ class LzmaDecoder {
 
   // Probabilty trees
   // FIXME: uint16
-  late final List<List<int>> is_match;
+  late final List<List<int>> _matchProbabilities;
   late final List<int> _repeatProbabilities;
   late final List<int> _repeat0Probabilities;
   late final List<List<int>> _longRepeat0Probabilities;
@@ -74,9 +74,9 @@ class LzmaDecoder {
 
     _output = List<int>.filled(uncompressedLength, 0);
 
-    is_match = <List<int>>[];
+    _matchProbabilities = <List<int>>[];
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      is_match.add(_input.makeProbabilityTree(16));
+      _matchProbabilities.add(_input.makeProbabilityTree(16));
     }
     _repeatProbabilities = _input.makeProbabilityTree(16);
     _repeat0Probabilities = _input.makeProbabilityTree(16);
@@ -107,7 +107,7 @@ class LzmaDecoder {
     distance3 = 0;
 
     for (var i = 0; i < _LzmaState.values.length; i++) {
-      _input.resetProbabilityTree(is_match[i]);
+      _input.resetProbabilityTree(_matchProbabilities[i]);
     }
     _input.resetProbabilityTree(_repeatProbabilities);
     _input.resetProbabilityTree(_repeat0Probabilities);
@@ -129,7 +129,7 @@ class LzmaDecoder {
     while (_outputPosition < _output.length) {
       var positionMask = (1 << _positionBits) - 1;
       var posState = _outputPosition & positionMask;
-      if (_input.readBit(is_match[state.index], posState) == 0) {
+      if (_input.readBit(_matchProbabilities[state.index], posState) == 0) {
         _decodeLiteral();
       } else if (_input.readBit(_repeatProbabilities, state.index) == 0) {
         _decodeMatch(posState);
