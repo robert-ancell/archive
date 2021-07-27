@@ -28,7 +28,7 @@ class LzmaDecoder {
   late final List<int> _output; // FIXME: Uint8List
   var _outputPosition = 0;
 
-  late final int _positionMask;
+  final int _positionBits;
   final int _literalPositionBits;
   final int _literalContextBits;
 
@@ -59,16 +59,15 @@ class LzmaDecoder {
   LzmaDecoder(
       {required InputStreamBase input,
       required int uncompressedLength,
+      required int positionBits,
       required int literalPositionBits,
-      required int literalContextBits,
-      required int positionBits})
-      : _literalPositionBits = literalPositionBits,
+      required int literalContextBits})
+      : _positionBits = positionBits,
+        _literalPositionBits = literalPositionBits,
         _literalContextBits = literalContextBits {
     _input = RangeDecoder(input);
 
     _output = List<int>.filled(uncompressedLength, 0);
-
-    _positionMask = (1 << positionBits) - 1;
 
     is_match = <List<int>>[];
     for (var i = 0; i < LzmaState.values.length; i++) {
@@ -123,7 +122,8 @@ class LzmaDecoder {
 
   List<int> decode() {
     while (_outputPosition < _output.length) {
-      var posState = _outputPosition & _positionMask;
+      var positionMask = (1 << _positionBits) - 1;
+      var posState = _outputPosition & positionMask;
       if (_input.readBit(is_match[state.index], posState) == 0) {
         _decodeLiteral();
       } else if (_input.readBit(is_rep, state.index) == 0) {
