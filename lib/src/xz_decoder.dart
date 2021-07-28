@@ -1,7 +1,10 @@
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import 'util/archive_exception.dart';
 import 'util/crc32.dart';
+import 'util/crc64.dart';
 import 'util/input_stream.dart';
 
 import 'lzma/lzma_decoder.dart';
@@ -13,13 +16,16 @@ class XZDecoder {
   }
 
   List<int> decodeBuffer(InputStreamBase input, {bool verify = false}) {
-    var decoder = _XZStreamDecoder();
+    var decoder = _XZStreamDecoder(verify: verify);
     return decoder.decode(input);
   }
 }
 
 /// Decodes an XZ stream.
 class _XZStreamDecoder {
+  // True if checksums are confirmed.
+  final bool verify;
+
   // Decoded data.
   final data = BytesBuilder();
 
@@ -31,6 +37,8 @@ class _XZStreamDecoder {
 
   // Block sizes.
   var _blockSizes = <_XZBlockSize>[];
+
+  _XZStreamDecoder({this.verify = false});
 
   // Decode this stream and return the uncompressed data.
   List<int> decode(InputStreamBase input) {
@@ -150,35 +158,71 @@ class _XZStreamDecoder {
       case 0: // none
         break;
       case 0x1: // CRC32
-        /*var crc = */ input.readUint32(); // FIXME
+        var expectedCrc = input.readUint32();
+        if (verify) {
+          var actualCrc = getCrc32(data.toBytes().sublist(startDataLength));
+          if (actualCrc != expectedCrc) {
+            throw ArchiveException('CRC32 check failed');
+          }
+        }
         break;
       case 0x2:
       case 0x3:
         input.skip(4);
+        if (verify) {
+          throw ArchiveException('Unknown check type $checkType');
+        }
         break;
       case 0x4: // CRC64
-        /*var crc = */ input.readUint64(); // FIXME
+        var expectedCrc = input.readUint64();
+        if (verify) {
+          var actualCrc = getCrc64(data.toBytes().sublist(startDataLength));
+          if (actualCrc != expectedCrc) {
+            throw ArchiveException('CRC64 check failed');
+          }
+        }
         break;
       case 0x5:
       case 0x6:
-        input.skip(8); // FIXME
+        input.skip(8);
+        if (verify) {
+          throw ArchiveException('Unknown check type $checkType');
+        }
         break;
       case 0x7:
       case 0x8:
       case 0x9:
         input.skip(16);
+        if (verify) {
+          throw ArchiveException('Unknown check type $checkType');
+        }
         break;
       case 0xa: // SHA-256
-        input.skip(32); // FIXME
+        var expectedCrc = input.readBytes(32).toUint8List();
+        if (verify) {
+          var actualCrc =
+              sha256.convert(data.toBytes().sublist(startDataLength)).bytes;
+          for (var i = 0; i < 32; i++) {
+            if (actualCrc[i] != expectedCrc[i]) {
+              throw ArchiveException('SHA-256 check failed');
+            }
+          }
+        }
         break;
       case 0xb:
       case 0xc:
         input.skip(32);
+        if (verify) {
+          throw ArchiveException('Unknown check type $checkType');
+        }
         break;
       case 0xd:
       case 0xe:
       case 0xf:
         input.skip(64);
+        if (verify) {
+          throw ArchiveException('Unknown check type $checkType');
+        }
         break;
       default:
         throw ArchiveException('Unknown block check type $checkType');
